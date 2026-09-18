@@ -525,7 +525,7 @@ export function itemComplete(item: ContentItem, watched: Set<string>) {
 }
 
 export function priorRequiredItems(item: ContentItem) {
-  if (["deadpool", "deadpool-2"].includes(item.id)) return [];
+  if (["deadpool", "deadpool-2", "moon-knight"].includes(item.id)) return [];
   const universeItems = UNIVERSE_CONTENT[item.universe];
   const index = universeItems.findIndex((candidate) => candidate.id === item.id);
   return universeItems.slice(0, index).filter((candidate) => candidate.required);

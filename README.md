@@ -26,6 +26,10 @@ npm run build
 - Required series must be completed episode by episode.
 - Optional entries appear in release order but never block the next required entry.
 - *Eternals* is optional and does not gate later MCU releases.
+- *Moon Knight* has no prerequisites and can be watched at any time.
+- Archive filters can be combined by Doomsday necessity and format.
+- Opening a universe tab automatically scrolls to its next required unwatched title.
+- Removing the latest watched checkpoint is immediate; removing an older checkpoint requires confirmation because dependent progress may also be cleared.
 - X-Men films retain their release-order locks. *Deadpool* requires only *X-Men* (2000), and *Deadpool 2* requires only *Deadpool*. *Deadpool & Wolverine* rejoins the normal gate and requires every earlier non-optional X-Men movie.
 - *Deadpool & Wolverine* is catalogued in the X-Men tab, while still counting as required X-Men content for universal Doomsday readiness.
 - The Street-Level Saga contains the 13 original Defenders-era seasons followed by *Hawkeye*, *Echo*, *Daredevil: Born Again*, and *The Punisher: One Last Kill*.

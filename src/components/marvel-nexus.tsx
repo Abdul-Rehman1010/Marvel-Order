@@ -30,6 +30,7 @@ import { FormEvent, Fragment, KeyboardEvent, useEffect, useMemo, useRef, useStat
 
 import {
   CONTENT,
+  CONTENT_BY_ID,
   MCU_CONTENT,
   STREET_CONTENT,
   XMEN_CONTENT,
@@ -46,7 +47,10 @@ import {
 
 type User = { id: string; username: string };
 type ProgressRecord = { contentId: string; episode: number };
-type Filter = "all" | "movies" | "series" | "specials" | "optional";
+type RequirementFilter = "all" | "doomsday" | "optional";
+type FormatFilter = "all" | "movie" | "series" | "special";
+type PendingUnwatch = { item: ContentItem; episode: number; newerRecords: ProgressRecord[] };
+type ScrollRequest = { contentId: string; token: number };
 
 const DOOMSDAY = new Date("2026-12-18T00:00:00");
 
@@ -268,6 +272,8 @@ function useDialogBehavior(onClose: () => void) {
     });
 
     function onKeyDown(event: globalThis.KeyboardEvent) {
+      const activeAlert = document.querySelector<HTMLElement>('[role="alertdialog"]');
+      if (activeAlert && activeAlert !== dialog) return;
       if (event.key === "Escape") {
         event.preventDefault();
         onCloseRef.current();
@@ -322,7 +328,7 @@ function TimelineCard({
   const episodeWatched = item.episodes?.filter((episode) => watched.has(progressKey(item.id, episode.id))).length ?? 0;
 
   return (
-    <article className={`timeline-card ${item.universe} ${complete ? "is-complete" : ""} ${!unlocked ? "is-locked" : ""} ${!item.required ? "is-optional" : ""}`}>
+    <article id={`timeline-item-${item.id}`} className={`timeline-card ${item.universe} ${complete ? "is-complete" : ""} ${!unlocked ? "is-locked" : ""} ${!item.required ? "is-optional" : ""}`}>
       <button className="card-visual" onClick={onOpen} aria-label={`Open ${item.title} details`}>
         <Image src={posterUrl(item)} alt={`${item.title} poster`} fill sizes="(max-width: 640px) 84px, 112px" />
         <div className="card-scrim" />
@@ -429,6 +435,37 @@ function DetailDrawer({
   );
 }
 
+function UnwatchConfirmation({
+  pending,
+  onCancel,
+  onConfirm,
+}: {
+  pending: PendingUnwatch;
+  onCancel: () => void;
+  onConfirm: () => void;
+}) {
+  const dialogRef = useDialogBehavior(onCancel);
+  const affectedTitles = [...new Set(pending.newerRecords.map((record) => CONTENT_BY_ID.get(record.contentId)?.title).filter(Boolean))];
+  const checkpointLabel = pending.episode > 0 ? `${pending.item.title}, episode ${pending.episode}` : pending.item.title;
+
+  return (
+    <div className="confirmation-shell">
+      <button className="confirmation-backdrop" onClick={onCancel} aria-label="Cancel removing watched status" />
+      <section ref={dialogRef} className="confirmation-dialog" role="alertdialog" aria-modal="true" aria-labelledby="unwatch-title" aria-describedby="unwatch-description" tabIndex={-1}>
+        <div className="confirmation-icon"><Zap size={22} /></div>
+        <p className="eyebrow">TIMELINE SAFEGUARD</p>
+        <h2 id="unwatch-title">Remove an earlier watched item?</h2>
+        <p id="unwatch-description">You watched {pending.newerRecords.length} newer checkpoint{pending.newerRecords.length === 1 ? "" : "s"} after <strong>{checkpointLabel}</strong>. Removing it may also clear later progress that depends on it.</p>
+        {affectedTitles.length > 0 && <p className="confirmation-affected">Newer progress includes {affectedTitles.slice(0, 3).join(", ")}{affectedTitles.length > 3 ? ` and ${affectedTitles.length - 3} more` : ""}.</p>}
+        <div className="confirmation-actions">
+          <button className="secondary-action" onClick={onCancel}>Keep watched</button>
+          <button className="danger-action" onClick={onConfirm}>Yes, remove it</button>
+        </div>
+      </section>
+    </div>
+  );
+}
+
 function LoreDrawer({ onClose }: { onClose: () => void }) {
   const dialogRef = useDialogBehavior(onClose);
   return (
@@ -462,7 +499,8 @@ export default function MarvelNexus() {
   const [databaseMode, setDatabaseMode] = useState("TIMELINE VAULT");
   const [loading, setLoading] = useState(true);
   const [universe, setUniverse] = useState<Universe>("mcu");
-  const [filter, setFilter] = useState<Filter>("all");
+  const [requirementFilter, setRequirementFilter] = useState<RequirementFilter>("all");
+  const [formatFilter, setFormatFilter] = useState<FormatFilter>("all");
   const [searchQuery, setSearchQuery] = useState("");
   const [selected, setSelected] = useState<ContentItem | null>(null);
   const [loreOpen, setLoreOpen] = useState(false);
@@ -470,6 +508,9 @@ export default function MarvelNexus() {
   const [notice, setNotice] = useState("");
   const [mobileMenu, setMobileMenu] = useState(false);
   const [loadError, setLoadError] = useState("");
+  const [pendingUnwatch, setPendingUnwatch] = useState<PendingUnwatch | null>(null);
+  const [scrollRequest, setScrollRequest] = useState<ScrollRequest | null>(null);
+  const scrollToken = useRef(0);
   const tabRefs = useRef<Record<Universe, HTMLButtonElement | null>>({ mcu: null, xmen: null, street: null });
 
   async function loadProgress() {
@@ -524,16 +565,17 @@ export default function MarvelNexus() {
   const localRequiredStats = useMemo(() => getStats(items, watched), [items, watched]);
   const doomsdayStats = useMemo(() => getStats([...MCU_CONTENT, ...XMEN_CONTENT], watched), [watched]);
   const visibleItems = items.filter((item) => {
-    if (filter === "movies") return item.kind === "movie";
-    if (filter === "series") return item.kind === "series";
-    if (filter === "specials") return item.kind === "special";
-    if (filter === "optional") return !item.required;
+    if (requirementFilter === "doomsday") return item.required && item.universe !== "street";
+    if (requirementFilter === "optional") return !item.required;
+    return true;
+  }).filter((item) => {
+    if (formatFilter !== "all") return item.kind === formatFilter;
     return true;
   }).filter((item) => item.title.toLocaleLowerCase().includes(searchQuery.trim().toLocaleLowerCase()));
   const nextRequired = items.find((item) => item.required && !itemComplete(item, watched));
   const nextUnlocked = items.find((item) => item.required && !itemComplete(item, watched) && isUnlocked(item, watched));
 
-  async function toggle(item: ContentItem, episode: number, value: boolean) {
+  async function persistToggle(item: ContentItem, episode: number, value: boolean) {
     const key = progressKey(item.id, episode);
     setBusyKey(key);
     setNotice("");
@@ -554,6 +596,24 @@ export default function MarvelNexus() {
     }
   }
 
+  function toggle(item: ContentItem, episode: number, value: boolean) {
+    if (!value) {
+      const recordIndex = progress.findIndex((record) => record.contentId === item.id && record.episode === episode);
+      if (recordIndex >= 0 && recordIndex < progress.length - 1) {
+        setPendingUnwatch({ item, episode, newerRecords: progress.slice(recordIndex + 1) });
+        return;
+      }
+    }
+    void persistToggle(item, episode, value);
+  }
+
+  function confirmUnwatch() {
+    if (!pendingUnwatch) return;
+    const { item, episode } = pendingUnwatch;
+    setPendingUnwatch(null);
+    void persistToggle(item, episode, false);
+  }
+
   async function logout() {
     try {
       const response = await fetch("/api/auth/logout", { method: "POST" });
@@ -565,14 +625,29 @@ export default function MarvelNexus() {
     }
   }
 
-  function selectUniverse(nextUniverse: Universe) {
+  useEffect(() => {
+    if (!scrollRequest) return;
+    const frame = window.requestAnimationFrame(() => {
+      document.getElementById(`timeline-item-${scrollRequest.contentId}`)?.scrollIntoView({ behavior: "smooth", block: "center" });
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [scrollRequest, universe]);
+
+  function selectUniverse(nextUniverse: Universe, scrollToNext = true) {
+    const nextItems = nextUniverse === "mcu" ? MCU_CONTENT : nextUniverse === "xmen" ? XMEN_CONTENT : STREET_CONTENT;
+    const nextItem = nextItems.find((item) => item.required && !itemComplete(item, watched));
     setUniverse(nextUniverse);
-    setFilter("all");
+    setRequirementFilter("all");
+    setFormatFilter("all");
     setSearchQuery("");
+    if (scrollToNext && nextItem) {
+      scrollToken.current += 1;
+      setScrollRequest({ contentId: nextItem.id, token: scrollToken.current });
+    }
   }
 
   function openArchiveItem(item: ContentItem) {
-    selectUniverse(item.universe);
+    selectUniverse(item.universe, false);
     setSelected(item);
   }
 
@@ -673,8 +748,13 @@ export default function MarvelNexus() {
           <div><p className="eyebrow">ARCHIVE // {universe === "mcu" ? "MARVEL CINEMATIC UNIVERSE" : universe === "xmen" ? "LEGACY MUTANT UNIVERSE" : "NEW YORK STREET-LEVEL CONTINUITY"}</p><h2>{universe === "mcu" ? "The Infinity & Multiverse Sagas" : universe === "xmen" ? "The X-Men Film Timeline" : "The Street-Level Saga"}</h2></div>
           <div className="archive-tools">
             <label className="search-field"><Search size={16} /><span className="sr-only">Search this archive</span><input value={searchQuery} onChange={(event) => setSearchQuery(event.target.value)} placeholder="Search this archive" /></label>
-            <div className="filter-row" aria-label="Filter archive">
-              {(["all", "movies", "series", "specials", "optional"] as Filter[]).map((value) => <button key={value} className={filter === value ? "active" : ""} onClick={() => setFilter(value)}>{value}</button>)}
+            <div className="filter-groups">
+              <div className="filter-group"><span>Mission</span><div className="filter-row" aria-label="Filter by Doomsday necessity">
+                {([['all', 'All'], ['doomsday', 'Necessary for Doomsday'], ['optional', 'Optional']] as [RequirementFilter, string][]).map(([value, label]) => <button key={value} aria-pressed={requirementFilter === value} disabled={universe === "street" && value === "doomsday"} title={universe === "street" && value === "doomsday" ? "Street-Level entries do not count toward Doomsday readiness" : undefined} className={requirementFilter === value ? "active" : ""} onClick={() => setRequirementFilter(value)}>{label}</button>)}
+              </div></div>
+              <div className="filter-group"><span>Format</span><div className="filter-row" aria-label="Filter by format">
+                {([['all', 'All'], ['movie', 'Movies'], ['series', 'TV shows'], ['special', 'Specials']] as [FormatFilter, string][]).map(([value, label]) => <button key={value} aria-pressed={formatFilter === value} className={formatFilter === value ? "active" : ""} onClick={() => setFormatFilter(value)}>{label}</button>)}
+              </div></div>
             </div>
           </div>
         </div>
@@ -694,7 +774,7 @@ export default function MarvelNexus() {
               />
             </Fragment>
           ))}
-          {!visibleItems.length && <div className="empty-state"><Search size={28} /><h3>No transmissions found</h3><p>Try another title or clear the active filter.</p><button onClick={() => { setSearchQuery(""); setFilter("all"); }}>Reset archive view</button></div>}
+          {!visibleItems.length && <div className="empty-state"><Search size={28} /><h3>No transmissions found</h3><p>Try another title or clear the active filters.</p><button onClick={() => { setSearchQuery(""); setRequirementFilter("all"); setFormatFilter("all"); }}>Reset archive view</button></div>}
         </section>
       </section>
 
@@ -702,6 +782,7 @@ export default function MarvelNexus() {
 
       {selected && <DetailDrawer item={selected} watched={watched} busyKey={busyKey} onClose={() => setSelected(null)} onOpenPrerequisite={openArchiveItem} onToggle={toggle} />}
       {loreOpen && <LoreDrawer onClose={() => setLoreOpen(false)} />}
+      {pendingUnwatch && <UnwatchConfirmation pending={pendingUnwatch} onCancel={() => setPendingUnwatch(null)} onConfirm={confirmUnwatch} />}
       {notice && <div className="toast" role="status" aria-live="polite"><Zap size={16} /> {notice}</div>}
     </main>
   );

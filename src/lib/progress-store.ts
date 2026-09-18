@@ -47,7 +47,7 @@ export function serverUnlockReason(item: ContentItem, watched: Set<string>) {
     }
   }
 
-  if (!["deadpool", "deadpool-2"].includes(item.id)) {
+  if (!["deadpool", "deadpool-2", "moon-knight"].includes(item.id)) {
     const list = UNIVERSE_CONTENT[item.universe];
     const index = list.findIndex((candidate) => candidate.id === item.id);
     const missing = list
