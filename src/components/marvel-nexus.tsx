@@ -57,6 +57,12 @@ const browserApiRequest: NexusApiRequest = (path, init) => fetch(path, init);
 
 const DOOMSDAY = new Date("2026-12-18T00:00:00");
 
+const INTRO_SLIDES = [
+  { label: "CREATOR SIGNAL", title: "Developed by Abdul Rehman Shahid" },
+  { label: "SPOILER PROTOCOL", title: "Every timeline follows its protected release order" },
+  { label: "CROSS-PLATFORM ARCHIVE", title: "Your mission continues on web and mobile" },
+] as const;
+
 function posterUrl(item: ContentItem) {
   return `/posters/${item.id}.webp`;
 }
@@ -101,8 +107,48 @@ function LoadingScreen() {
   );
 }
 
+function DeveloperCarousel({ placement }: { placement: "auth" | "dashboard" }) {
+  const [activeSlide, setActiveSlide] = useState(0);
+
+  useEffect(() => {
+    const timer = window.setInterval(() => {
+      setActiveSlide((current) => (current + 1) % INTRO_SLIDES.length);
+    }, 4600);
+    return () => window.clearInterval(timer);
+  }, []);
+
+  const slide = INTRO_SLIDES[activeSlide];
+
+  return (
+    <section
+      className={`developer-carousel ${placement}`}
+      role="region"
+      aria-roledescription="carousel"
+      aria-label="Doom Flix introduction"
+    >
+      <div className="carousel-signal" aria-hidden="true"><Radio size={15} /></div>
+      <div className="carousel-message" key={slide.label} aria-live="polite">
+        <span>{slide.label}</span>
+        <strong>{slide.title}</strong>
+      </div>
+      <div className="carousel-dots" aria-label="Choose introduction slide">
+        {INTRO_SLIDES.map((item, index) => (
+          <button
+            key={item.label}
+            type="button"
+            className={index === activeSlide ? "active" : ""}
+            onClick={() => setActiveSlide(index)}
+            aria-label={`Show slide ${index + 1}: ${item.label.toLowerCase()}`}
+            aria-current={index === activeSlide ? "true" : undefined}
+          ><span /></button>
+        ))}
+      </div>
+    </section>
+  );
+}
+
 function AuthScreen({ onAuthenticated, request }: { onAuthenticated: () => void; request: NexusApiRequest }) {
-  const [mode, setMode] = useState<"signup" | "login">("signup");
+  const [mode, setMode] = useState<"signup" | "login">("login");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
@@ -136,9 +182,12 @@ function AuthScreen({ onAuthenticated, request }: { onAuthenticated: () => void;
       <div className="auth-ambient auth-ambient-one" />
       <div className="auth-ambient auth-ambient-two" />
       <section className="auth-intro">
-        <div className="brand-lockup">
-          <div className="brand-mark"><span>D</span></div>
-          <div><strong>DOOM FLIX</strong><small>WATCH PROTOCOL</small></div>
+        <div className="auth-start">
+          <div className="brand-lockup">
+            <div className="brand-mark"><span>D</span></div>
+            <div><strong>DOOM FLIX</strong><small>WATCH PROTOCOL</small></div>
+          </div>
+          <DeveloperCarousel placement="auth" />
         </div>
         <div className="auth-copy">
           <p className="eyebrow"><Radio size={14} /> MISSION // DOOMSDAY</p>
@@ -160,8 +209,9 @@ function AuthScreen({ onAuthenticated, request }: { onAuthenticated: () => void;
           <h2>{mode === "signup" ? "Create your archive" : "Resume your mission"}</h2>
           <p className="muted">{mode === "signup" ? "One local profile. No email or external identity required." : "Enter your stored operator credentials."}</p>
           <div className="auth-switch">
-            <button className={mode === "signup" ? "active" : ""} onClick={() => { setMode("signup"); setError(""); }}>Create profile</button>
-            <button className={mode === "login" ? "active" : ""} onClick={() => { setMode("login"); setError(""); }}>Sign in</button>
+            <span className={`auth-switch-track ${mode}`} aria-hidden="true" />
+            <button type="button" className={mode === "login" ? "active" : ""} onClick={() => { setMode("login"); setError(""); }}>Sign in</button>
+            <button type="button" className={mode === "signup" ? "active" : ""} onClick={() => { setMode("signup"); setError(""); }}>Create account</button>
           </div>
           <form onSubmit={submit}>
             <label>Operator name<input name="username" autoComplete="username" placeholder="e.g. watcher_616" required minLength={3} maxLength={24} /></label>
@@ -172,6 +222,12 @@ function AuthScreen({ onAuthenticated, request }: { onAuthenticated: () => void;
               {!busy && <ArrowRight size={17} />}
             </button>
           </form>
+          <p className="auth-mode-link">
+            {mode === "login" ? "New to Doom Flix?" : "Already have an account?"}
+            <button type="button" onClick={() => { setMode(mode === "login" ? "signup" : "login"); setError(""); }}>
+              {mode === "login" ? "Create an account" : "Sign in"}
+            </button>
+          </p>
           <div className="security-note"><ShieldCheck size={15} /><span>Password protected. Progress stored in the local timeline vault.</span></div>
         </div>
       </section>
@@ -695,6 +751,8 @@ export default function MarvelNexus({ request = browserApiRequest }: { request?:
           <button className="icon-button mobile-menu" onClick={() => setMobileMenu((value) => !value)} aria-expanded={mobileMenu} aria-label={mobileMenu ? "Close navigation" : "Open navigation"}><Menu size={18} /></button>
         </div>
       </header>
+
+      <DeveloperCarousel placement="dashboard" />
 
       <section className="mission-stage">
         <div className="mission-stage-backdrop"><Image src={backdropUrl(activeHero)} alt="" fill priority sizes="100vw" /><div /></div>
