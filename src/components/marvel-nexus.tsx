@@ -10,9 +10,11 @@ import {
   Database,
   Eye,
   EyeOff,
+  ExternalLink,
   Film,
   Fingerprint,
   Layers3,
+  Link2Off,
   LockKeyhole,
   LogOut,
   Orbit,
@@ -43,6 +45,7 @@ import {
   type ContentItem,
   type Universe,
 } from "@/lib/content";
+import { normalizeWatchTitle, parseWatchLinksCsv, type WatchLinkCatalogue } from "@/lib/watch-links";
 
 type User = { id: string; username: string };
 type ProgressRecord = { contentId: string; episode: number };
@@ -310,6 +313,30 @@ function ProgressRing({ value }: { value: number }) {
   );
 }
 
+function WatchSource({
+  item,
+  url,
+  loaded,
+  unlocked,
+  placement,
+}: {
+  item: ContentItem;
+  url?: string;
+  loaded: boolean;
+  unlocked: boolean;
+  placement: "card" | "drawer";
+}) {
+  const className = `watch-source ${placement}`;
+  if (!loaded) return <span className={`${className} unavailable`}><Link2Off size={14} /> Loading watch link…</span>;
+  if (!url) return <span className={`${className} unavailable`}><Link2Off size={14} /> Watch link unavailable</span>;
+  if (!unlocked) return <span className={`${className} locked`}><LockKeyhole size={14} /> Watch link unlocks after prerequisites</span>;
+  return (
+    <a className={`${className} available`} href={url} target="_blank" rel="noopener noreferrer" aria-label={`Watch ${item.title} on an approved provider`}>
+      <Play size={14} /> Watch {item.kind === "series" ? "series" : item.kind} <ExternalLink size={13} />
+    </a>
+  );
+}
+
 function useDialogBehavior(onClose: () => void) {
   const dialogRef = useRef<HTMLElement>(null);
   const onCloseRef = useRef(onClose);
@@ -370,6 +397,8 @@ function TimelineCard({
   onOpen,
   onOpenPrerequisite,
   onToggle,
+  watchUrl,
+  watchLinksLoaded,
 }: {
   item: ContentItem;
   index: number;
@@ -378,6 +407,8 @@ function TimelineCard({
   onOpen: () => void;
   onOpenPrerequisite: (item: ContentItem) => void;
   onToggle: (item: ContentItem, episode: number, value: boolean) => void;
+  watchUrl?: string;
+  watchLinksLoaded: boolean;
 }) {
   const complete = itemComplete(item, watched);
   const unlocked = isUnlocked(item, watched);
@@ -406,6 +437,7 @@ function TimelineCard({
         {!unlocked && <div className="card-lock-note"><LockKeyhole size={15} /><span><strong>Locked:</strong> {reason}</span></div>}
         {prerequisite && <button className="prerequisite-link" onClick={() => onOpenPrerequisite(prerequisite)}>Open {prerequisite.title} <ChevronRight size={14} /></button>}
         {!item.required && <p className="optional-note">Optional entry · excluded from Doomsday readiness</p>}
+        <WatchSource item={item} url={watchUrl} loaded={watchLinksLoaded} unlocked={unlocked} placement="card" />
         {item.kind === "series" ? (
           <button className="card-action" onClick={onOpen}>
             <span>{complete ? "Season complete" : `${episodeWatched}/${item.episodes?.length ?? 0} episodes`}</span><ChevronRight size={16} />
@@ -427,6 +459,8 @@ function DetailDrawer({
   onClose,
   onOpenPrerequisite,
   onToggle,
+  watchUrl,
+  watchLinksLoaded,
 }: {
   item: ContentItem;
   watched: Set<string>;
@@ -434,6 +468,8 @@ function DetailDrawer({
   onClose: () => void;
   onOpenPrerequisite: (item: ContentItem) => void;
   onToggle: (item: ContentItem, episode: number, value: boolean) => void;
+  watchUrl?: string;
+  watchLinksLoaded: boolean;
 }) {
   const complete = itemComplete(item, watched);
   const unlocked = isUnlocked(item, watched);
@@ -461,6 +497,7 @@ function DetailDrawer({
           {!unlocked && <div className="prerequisite-alert"><LockKeyhole size={18} /><div><strong>PREREQUISITE REQUIRED</strong><p>{reason}</p>{prerequisite && <button onClick={() => onOpenPrerequisite(prerequisite)}>Open {prerequisite.title} <ChevronRight size={14} /></button>}</div></div>}
           <p className="drawer-summary">{item.summary}</p>
           <div className="lore-brief"><span><Orbit size={16} /> CONTINUITY BRIEF</span><p>{item.lore}</p></div>
+          <WatchSource item={item} url={watchUrl} loaded={watchLinksLoaded} unlocked={unlocked} placement="drawer" />
 
           {item.kind === "series" ? (
             <section className="episode-section">
@@ -567,6 +604,7 @@ export default function MarvelNexus({ request = browserApiRequest }: { request?:
   const [loadError, setLoadError] = useState("");
   const [pendingUnwatch, setPendingUnwatch] = useState<PendingUnwatch | null>(null);
   const [scrollRequest, setScrollRequest] = useState<ScrollRequest | null>(null);
+  const [watchCatalogue, setWatchCatalogue] = useState<WatchLinkCatalogue & { loaded: boolean }>({ links: new Map(), issues: [], loaded: false });
   const scrollToken = useRef(0);
   const tabRefs = useRef<Record<Universe, HTMLButtonElement | null>>({ mcu: null, xmen: null, street: null });
 
@@ -620,6 +658,22 @@ export default function MarvelNexus({ request = browserApiRequest }: { request?:
       });
     return () => controller.abort();
   }, [request]);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    const csvUrl = new URL("./watch-links.csv", document.baseURI);
+    fetch(csvUrl, { cache: "no-store", signal: controller.signal })
+      .then(async (response) => {
+        if (!response.ok) throw new Error(`Watch-link CSV returned ${response.status}.`);
+        return response.text();
+      })
+      .then((source) => setWatchCatalogue({ ...parseWatchLinksCsv(source, CONTENT.map((item) => item.title)), loaded: true }))
+      .catch((error: unknown) => {
+        if (error instanceof DOMException && error.name === "AbortError") return;
+        setWatchCatalogue({ links: new Map(), issues: [error instanceof Error ? error.message : "Watch-link CSV could not be loaded."], loaded: true });
+      });
+    return () => controller.abort();
+  }, []);
 
   const watched = useMemo(() => new Set(progress.map((record) => progressKey(record.contentId, record.episode))), [progress]);
   const items = universe === "mcu" ? MCU_CONTENT : universe === "xmen" ? XMEN_CONTENT : STREET_CONTENT;
@@ -828,6 +882,11 @@ export default function MarvelNexus({ request = browserApiRequest }: { request?:
           </div>
         </div>
 
+        <section className="watch-catalogue-status glass-panel" aria-live="polite">
+          <div className="watch-catalogue-summary"><span className="watch-status-icon"><Play size={16} /></span><div><p className="eyebrow">WATCH SOURCE CATALOGUE</p><strong>{watchCatalogue.loaded ? `${watchCatalogue.links.size} of ${CONTENT.length} titles linked` : "Loading watch links…"}</strong><small>{watchCatalogue.loaded ? `${CONTENT.length - watchCatalogue.links.size} title${CONTENT.length - watchCatalogue.links.size === 1 ? "" : "s"} currently show as unavailable.` : "Reading public/watch-links.csv"}</small></div></div>
+          {watchCatalogue.issues.length > 0 && <div className="watch-catalogue-issues"><b>{watchCatalogue.issues.length} CSV issue{watchCatalogue.issues.length === 1 ? "" : "s"}</b>{watchCatalogue.issues.slice(0, 3).map((issue) => <span key={issue}>{issue}</span>)}{watchCatalogue.issues.length > 3 && <span>Plus {watchCatalogue.issues.length - 3} more.</span>}</div>}
+        </section>
+
         <section id="timeline-panel" role="tabpanel" aria-labelledby={`${universe}-tab`} className="timeline-grid">
           {visibleItems.map((item, visibleIndex) => (
             <Fragment key={item.id}>
@@ -840,6 +899,8 @@ export default function MarvelNexus({ request = browserApiRequest }: { request?:
                 onOpen={() => setSelected(item)}
                 onOpenPrerequisite={openArchiveItem}
                 onToggle={toggle}
+                watchUrl={watchCatalogue.links.get(normalizeWatchTitle(item.title))}
+                watchLinksLoaded={watchCatalogue.loaded}
               />
             </Fragment>
           ))}
@@ -849,7 +910,7 @@ export default function MarvelNexus({ request = browserApiRequest }: { request?:
 
       <footer><div className="brand-lockup compact"><div className="brand-mark"><span>D</span></div><div><strong>DOOM FLIX</strong><small>WATCH PROTOCOL</small></div></div><p>Personal viewing archive • Release-order spoiler protection active</p><span><Database size={14} /> {CONTENT.length} transmissions indexed</span></footer>
 
-      {selected && <DetailDrawer item={selected} watched={watched} busyKey={busyKey} onClose={() => setSelected(null)} onOpenPrerequisite={openArchiveItem} onToggle={toggle} />}
+      {selected && <DetailDrawer item={selected} watched={watched} busyKey={busyKey} onClose={() => setSelected(null)} onOpenPrerequisite={openArchiveItem} onToggle={toggle} watchUrl={watchCatalogue.links.get(normalizeWatchTitle(selected.title))} watchLinksLoaded={watchCatalogue.loaded} />}
       {loreOpen && <LoreDrawer onClose={() => setLoreOpen(false)} />}
       {pendingUnwatch && <UnwatchConfirmation pending={pendingUnwatch} onCancel={() => setPendingUnwatch(null)} onConfirm={confirmUnwatch} />}
       {notice && <div className="toast" role="status" aria-live="polite"><Zap size={16} /> {notice}</div>}
