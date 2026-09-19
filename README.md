@@ -95,3 +95,13 @@ On this Windows workstation, `npm run mobile:apk` performs the sync and creates 
 `mobile:open` requires Android Studio. On Windows, install Android Studio with its bundled JDK and Android SDK before compiling an APK or Android App Bundle. Do not set Capacitor's `server.url` in production: the app ships its frontend bundle locally and calls only the HTTPS API routes on Vercel.
 
 The web application continues to use its HTTP-only cookie. The Android bundle receives a separate bearer session token from the same login/signup endpoints and stores it through Capacitor Preferences. API requests accept either credential type, and CORS is restricted to Capacitor's local origins plus the local Vite development server.
+
+## Watch-source CSV
+
+Optional legal watch links are loaded from `public/watch-links.csv` by both the web app and the bundled Android frontend. The file starts with a header and no data rows:
+
+```csv
+title,url
+```
+
+Add one row per movie, special, or complete TV series. `title` must match the title displayed in Doom Flix; series use one link for the complete series, not separate episode links. Values containing commas must be enclosed in double quotes. Only HTTPS links from supported licensed providers and availability services are accepted. Missing titles or URLs, unknown catalogue titles, duplicates, invalid links, and unsupported providers are surfaced in the UI instead of creating a broken Watch button.
