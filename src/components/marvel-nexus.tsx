@@ -15,7 +15,6 @@ import {
   Layers3,
   LockKeyhole,
   LogOut,
-  Menu,
   Orbit,
   Play,
   Radio,
@@ -147,7 +146,7 @@ function DeveloperCarousel({ placement }: { placement: "auth" | "dashboard" }) {
   );
 }
 
-function AuthScreen({ onAuthenticated, request }: { onAuthenticated: () => void; request: NexusApiRequest }) {
+function AuthScreen({ onAuthenticated, request }: { onAuthenticated: (isNewAccount: boolean) => void; request: NexusApiRequest }) {
   const [mode, setMode] = useState<"signup" | "login">("login");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
@@ -169,7 +168,7 @@ function AuthScreen({ onAuthenticated, request }: { onAuthenticated: () => void;
         setError(payload.error ?? "Unable to open the archive.");
         return;
       }
-      onAuthenticated();
+      onAuthenticated(mode === "signup");
     } catch {
       setError("The local timeline vault could not be reached. Try again.");
     } finally {
@@ -565,7 +564,6 @@ export default function MarvelNexus({ request = browserApiRequest }: { request?:
   const [loreOpen, setLoreOpen] = useState(false);
   const [busyKey, setBusyKey] = useState<string | null>(null);
   const [notice, setNotice] = useState("");
-  const [mobileMenu, setMobileMenu] = useState(false);
   const [loadError, setLoadError] = useState("");
   const [pendingUnwatch, setPendingUnwatch] = useState<PendingUnwatch | null>(null);
   const [scrollRequest, setScrollRequest] = useState<ScrollRequest | null>(null);
@@ -592,6 +590,11 @@ export default function MarvelNexus({ request = browserApiRequest }: { request?:
     } finally {
       setLoading(false);
     }
+  }
+
+  async function handleAuthenticated(isNewAccount: boolean) {
+    await loadProgress();
+    if (isNewAccount) setLoreOpen(true);
   }
 
   useEffect(() => {
@@ -727,7 +730,7 @@ export default function MarvelNexus({ request = browserApiRequest }: { request?:
 
   if (loading) return <LoadingScreen />;
   if (loadError) return <main className="loading-screen error-screen"><Zap size={34} /><p className="eyebrow">ARCHIVE LINK INTERRUPTED</p><h1>{loadError}</h1><button className="primary-action" onClick={loadProgress}>Retry connection <ArrowRight size={17} /></button></main>;
-  if (!user) return <AuthScreen onAuthenticated={loadProgress} request={request} />;
+  if (!user) return <AuthScreen onAuthenticated={handleAuthenticated} request={request} />;
 
   const activeHero = nextUnlocked ?? nextRequired ?? items.at(-1)!;
   const doomsdayComplete = doomsdayStats.watchedUnits === doomsdayStats.totalUnits;
@@ -740,15 +743,15 @@ export default function MarvelNexus({ request = browserApiRequest }: { request?:
           <div className="brand-mark"><span>D</span></div>
           <div><strong>DOOM FLIX</strong><small>WATCH PROTOCOL</small></div>
         </div>
-        <nav className={mobileMenu ? "open" : ""}>
+        <nav>
           <button className="nav-active"><Layers3 size={15} /> Timeline</button>
           <button onClick={() => setLoreOpen(true)}><Orbit size={15} /> Lore brief</button>
         </nav>
         <div className="operator-block">
           <span className="vault-status"><i /> {databaseMode}</span>
           <div className="operator-name"><CircleUserRound size={18} /><div><small>OPERATOR</small><strong>{user.username}</strong></div></div>
+          <button className="mobile-lore-action" onClick={() => setLoreOpen(true)} aria-label="Open lore brief"><Orbit size={17} /><span>Lore</span></button>
           <button className="icon-button" onClick={logout} aria-label="Log out"><LogOut size={17} /></button>
-          <button className="icon-button mobile-menu" onClick={() => setMobileMenu((value) => !value)} aria-expanded={mobileMenu} aria-label={mobileMenu ? "Close navigation" : "Open navigation"}><Menu size={18} /></button>
         </div>
       </header>
 

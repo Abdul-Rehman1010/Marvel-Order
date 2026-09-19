@@ -47,7 +47,8 @@ button:focus-visible, input:focus-visible, [tabindex]:focus-visible { outline: 2
 .operator-name strong { margin-top: 3px; max-width: 130px; overflow: hidden; text-overflow: ellipsis; font-size: 13px; }
 .icon-button { width: 36px; height: 36px; display: grid; place-items: center; border: 1px solid var(--border); border-radius: 9px; background: var(--base); color: var(--secondary); cursor: pointer; transition: .2s ease; }
 .icon-button:hover { color: var(--text); border-color: var(--mcu); background: var(--hover); }
-.mobile-menu { display: none; }
+.mobile-lore-action { min-height: 36px; padding: 0 11px; display: none; align-items: center; gap: 7px; border: 1px solid rgb(168 255 96 / 42%); border-radius: 9px; background: rgb(168 255 96 / 8%); color: var(--global); cursor: pointer; font: 700 11px/1 var(--display); letter-spacing: .06em; text-transform: uppercase; transition: .2s ease; }
+.mobile-lore-action:hover { border-color: var(--global); background: rgb(168 255 96 / 13%); color: var(--text); }
 
 .developer-carousel { min-height: 54px; position: relative; z-index: 10; display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 12px; overflow: hidden; border-bottom: 1px solid rgb(42 66 49 / 70%); background: linear-gradient(90deg, rgb(70 224 124 / 10%), rgb(13 21 16 / 94%) 40%, rgb(168 255 96 / 6%)); }
 .developer-carousel.dashboard { padding: 9px clamp(18px, 4vw, 64px); }
@@ -350,11 +351,9 @@ footer > span { display: flex; align-items: center; gap: 6px; }
 @media (max-width: 820px) {
   .app-shell, .auth-shell, .loading-screen { min-height: 100vh; min-height: 100dvh; }
   .topbar { height: calc(64px + env(safe-area-inset-top)); padding-top: env(safe-area-inset-top); padding-right: max(14px, env(safe-area-inset-right)); padding-left: max(14px, env(safe-area-inset-left)); gap: 12px; }
-  .topbar nav { display: none; position: absolute; left: max(14px, env(safe-area-inset-left)); right: max(14px, env(safe-area-inset-right)); top: calc(70px + env(safe-area-inset-top)); height: auto; padding: 8px; border: 1px solid var(--border); border-radius: 12px; background: var(--raised); box-shadow: var(--shadow); }
-  .topbar nav.open { display: grid; }
-  .topbar nav button { min-height: 44px; border: 0; border-radius: 8px; justify-content: flex-start; padding: 0 13px; }
+  .topbar nav { display: none; }
   .icon-button { width: 44px; height: 44px; }
-  .mobile-menu { display: grid; }
+  .mobile-lore-action { min-height: 44px; display: flex; }
   .operator-block { gap: 8px; }
   .operator-name, .vault-status { display: none; }
   .mission-hero { height: auto; min-height: 0; }
