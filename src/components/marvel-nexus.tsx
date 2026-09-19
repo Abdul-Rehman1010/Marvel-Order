@@ -882,11 +882,6 @@ export default function MarvelNexus({ request = browserApiRequest }: { request?:
           </div>
         </div>
 
-        <section className="watch-catalogue-status glass-panel" aria-live="polite">
-          <div className="watch-catalogue-summary"><span className="watch-status-icon"><Play size={16} /></span><div><p className="eyebrow">WATCH SOURCE CATALOGUE</p><strong>{watchCatalogue.loaded ? `${watchCatalogue.links.size} of ${CONTENT.length} titles linked` : "Loading watch links…"}</strong><small>{watchCatalogue.loaded ? `${CONTENT.length - watchCatalogue.links.size} title${CONTENT.length - watchCatalogue.links.size === 1 ? "" : "s"} currently show as unavailable.` : "Reading public/watch-links.csv"}</small></div></div>
-          {watchCatalogue.issues.length > 0 && <div className="watch-catalogue-issues"><b>{watchCatalogue.issues.length} CSV issue{watchCatalogue.issues.length === 1 ? "" : "s"}</b>{watchCatalogue.issues.slice(0, 3).map((issue) => <span key={issue}>{issue}</span>)}{watchCatalogue.issues.length > 3 && <span>Plus {watchCatalogue.issues.length - 3} more.</span>}</div>}
-        </section>
-
         <section id="timeline-panel" role="tabpanel" aria-labelledby={`${universe}-tab`} className="timeline-grid">
           {visibleItems.map((item, visibleIndex) => (
             <Fragment key={item.id}>
