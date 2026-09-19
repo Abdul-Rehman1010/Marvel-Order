@@ -75,11 +75,13 @@ The Android app is a bundled Vite/React frontend that reuses the same `MarvelNex
 
 Keep shared product changes in `src/components`, `src/data`, and `src/app/globals.css`. They will be used by both targets; deploy the Next.js app normally for the web, then run `npm run mobile:sync` before building the next Android release.
 
-Create `mobile/.env.local` from `mobile/.env.example` and set the deployed production origin:
+The committed Android production origin is stored in `mobile/.env.production`:
 
 ```text
-VITE_API_ORIGIN=https://your-production-project.vercel.app
+VITE_API_ORIGIN=https://doomflix-pi.vercel.app
 ```
+
+For local overrides, create `mobile/.env.local` from `mobile/.env.example`. Update the committed production file whenever the Vercel domain changes so future APK builds use the correct API automatically.
 
 Build and synchronize the Android project:
 

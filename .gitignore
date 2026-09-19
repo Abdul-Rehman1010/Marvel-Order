@@ -35,6 +35,7 @@ yarn-error.log*
 # env files (can opt-in for committing if needed)
 .env*
 !.env.example
+!mobile/.env.production
 
 # local timeline database
 marvel-vault.db
