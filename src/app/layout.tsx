@@ -15,12 +15,12 @@ const spaceGrotesk = Space_Grotesk({
 });
 
 export const metadata: Metadata = {
-  title: "Nexus Watch Protocol",
+  title: "Doom Flix",
   description: "A spoiler-safe MCU and X-Men release-order tracker for the road to Avengers: Doomsday.",
 };
 
 export const viewport: Viewport = {
-  themeColor: "#0b0e14",
+  themeColor: "#070b08",
   width: "device-width",
   initialScale: 1,
 };

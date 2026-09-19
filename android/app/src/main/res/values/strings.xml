@@ -1,7 +1,7 @@
 <?xml version='1.0' encoding='utf-8'?>
 <resources>
-    <string name="app_name">Nexus Watch Protocol</string>
-    <string name="title_activity_main">Nexus Watch Protocol</string>
+    <string name="app_name">Doom Flix</string>
+    <string name="title_activity_main">Doom Flix</string>
     <string name="package_name">com.abdulrehman.nexuswatch</string>
     <string name="custom_url_scheme">com.abdulrehman.nexuswatch</string>
 </resources>

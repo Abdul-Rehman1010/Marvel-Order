@@ -2,11 +2,11 @@ import type { CapacitorConfig } from "@capacitor/cli";
 
 const config: CapacitorConfig = {
   appId: "com.abdulrehman.nexuswatch",
-  appName: "Nexus Watch Protocol",
+  appName: "Doom Flix",
   webDir: "mobile-dist",
-  backgroundColor: "#0b0e14",
+  backgroundColor: "#070b08",
   android: {
-    backgroundColor: "#0b0e14",
+    backgroundColor: "#070b08",
   },
   server: {
     androidScheme: "https",

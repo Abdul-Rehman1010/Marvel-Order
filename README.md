@@ -1,4 +1,4 @@
-# Nexus Watch Protocol
+# Doom Flix
 
 A local-first MCU, X-Men, and Street-Level Saga release-order tracker for the road to *Avengers: Doomsday*. It includes password-protected local profiles, database-backed progress, enforced spoiler-safe prerequisites, individual episode tracking, exact remaining runtime, optional-content handling, and a live Doomsday countdown.
 

@@ -137,8 +137,8 @@ function AuthScreen({ onAuthenticated, request }: { onAuthenticated: () => void;
       <div className="auth-ambient auth-ambient-two" />
       <section className="auth-intro">
         <div className="brand-lockup">
-          <div className="brand-mark"><span>N</span></div>
-          <div><strong>NEXUS</strong><small>WATCH PROTOCOL</small></div>
+          <div className="brand-mark"><span>D</span></div>
+          <div><strong>DOOM FLIX</strong><small>WATCH PROTOCOL</small></div>
         </div>
         <div className="auth-copy">
           <p className="eyebrow"><Radio size={14} /> MISSION // DOOMSDAY</p>
@@ -168,7 +168,7 @@ function AuthScreen({ onAuthenticated, request }: { onAuthenticated: () => void;
             <label>Access key<span className="password-field"><input name="password" type={showPassword ? "text" : "password"} autoComplete={mode === "signup" ? "new-password" : "current-password"} placeholder="Enter password" required minLength={4} maxLength={72} /><button type="button" onClick={() => setShowPassword((value) => !value)} aria-label={showPassword ? "Hide password" : "Show password"}>{showPassword ? <EyeOff size={17} /> : <Eye size={17} />}</button></span></label>
             {error && <div className="form-error"><Zap size={14} /> {error}</div>}
             <button className="primary-action" disabled={busy} type="submit">
-              {busy ? "Establishing link…" : mode === "signup" ? "Initialize profile" : "Enter the Nexus"}
+              {busy ? "Establishing link…" : mode === "signup" ? "Initialize profile" : "Enter Doom Flix"}
               {!busy && <ArrowRight size={17} />}
             </button>
           </form>
@@ -681,8 +681,8 @@ export default function MarvelNexus({ request = browserApiRequest }: { request?:
       <div className="ambient-grid" />
       <header className="topbar">
         <div className="brand-lockup compact">
-          <div className="brand-mark"><span>N</span></div>
-          <div><strong>NEXUS</strong><small>WATCH PROTOCOL</small></div>
+          <div className="brand-mark"><span>D</span></div>
+          <div><strong>DOOM FLIX</strong><small>WATCH PROTOCOL</small></div>
         </div>
         <nav className={mobileMenu ? "open" : ""}>
           <button className="nav-active"><Layers3 size={15} /> Timeline</button>
@@ -786,7 +786,7 @@ export default function MarvelNexus({ request = browserApiRequest }: { request?:
         </section>
       </section>
 
-      <footer><div className="brand-lockup compact"><div className="brand-mark"><span>N</span></div><div><strong>NEXUS</strong><small>WATCH PROTOCOL</small></div></div><p>Personal viewing archive • Release-order spoiler protection active</p><span><Database size={14} /> {CONTENT.length} transmissions indexed</span></footer>
+      <footer><div className="brand-lockup compact"><div className="brand-mark"><span>D</span></div><div><strong>DOOM FLIX</strong><small>WATCH PROTOCOL</small></div></div><p>Personal viewing archive • Release-order spoiler protection active</p><span><Database size={14} /> {CONTENT.length} transmissions indexed</span></footer>
 
       {selected && <DetailDrawer item={selected} watched={watched} busyKey={busyKey} onClose={() => setSelected(null)} onOpenPrerequisite={openArchiveItem} onToggle={toggle} />}
       {loreOpen && <LoreDrawer onClose={() => setLoreOpen(false)} />}
