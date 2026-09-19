@@ -20,6 +20,7 @@
 # production
 /build
 /mobile-dist
+/.local-tools
 
 # misc
 .DS_Store

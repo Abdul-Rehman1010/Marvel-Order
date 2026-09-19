@@ -88,6 +88,8 @@ npm run mobile:sync
 npm run mobile:open
 ```
 
+On this Windows workstation, `npm run mobile:apk` performs the sync and creates a signed debug APK at `android/app/build/outputs/apk/debug/app-debug.apk`. It automatically selects the compatible project-local JDK 21 instead of Android Studio's newer Java 25 runtime.
+
 `mobile:open` requires Android Studio. On Windows, install Android Studio with its bundled JDK and Android SDK before compiling an APK or Android App Bundle. Do not set Capacitor's `server.url` in production: the app ships its frontend bundle locally and calls only the HTTPS API routes on Vercel.
 
 The web application continues to use its HTTP-only cookie. The Android bundle receives a separate bearer session token from the same login/signup endpoints and stores it through Capacitor Preferences. API requests accept either credential type, and CORS is restricted to Capacitor's local origins plus the local Vite development server.

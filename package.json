@@ -10,6 +10,7 @@
     "mobile:dev": "vite --config mobile/vite.config.ts",
     "mobile:build": "vite build --config mobile/vite.config.ts",
     "mobile:sync": "npm run mobile:build && cap sync android",
+    "mobile:apk": "node scripts/build-android.mjs",
     "mobile:open": "cap open android",
     "db:reset-users": "node --env-file-if-exists=.env.local --env-file-if-exists=.env scripts/reset-users.mjs"
   },
