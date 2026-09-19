@@ -12,6 +12,15 @@ function hashToken(token: string) {
   return createHash("sha256").update(token).digest("hex");
 }
 
+function requestToken(request: NextRequest) {
+  const authorization = request.headers.get("authorization");
+  if (authorization?.startsWith("Bearer ")) {
+    const token = authorization.slice("Bearer ".length).trim();
+    if (token) return token;
+  }
+  return request.cookies.get(SESSION_COOKIE)?.value;
+}
+
 export async function createSession(userId: string, response: NextResponse) {
   await ensureDatabase();
   const token = randomBytes(32).toString("base64url");
@@ -30,11 +39,13 @@ export async function createSession(userId: string, response: NextResponse) {
     path: "/",
     maxAge: SESSION_LIFETIME_SECONDS,
   });
+
+  return token;
 }
 
 export async function deleteSession(request: NextRequest, response: NextResponse) {
   await ensureDatabase();
-  const token = request.cookies.get(SESSION_COOKIE)?.value;
+  const token = requestToken(request);
   if (token) {
     await db.execute({
       sql: "DELETE FROM sessions WHERE token_hash = ?",
@@ -54,7 +65,7 @@ export type SessionUser = { id: string; username: string };
 
 export async function getSessionUser(request: NextRequest): Promise<SessionUser | null> {
   await ensureDatabase();
-  const token = request.cookies.get(SESSION_COOKIE)?.value;
+  const token = requestToken(request);
   if (!token) return null;
 
   const result = await db.execute({
@@ -77,4 +88,3 @@ export async function getSessionUser(request: NextRequest): Promise<SessionUser 
 
   return { id: String(row.id), username: String(row.username) };
 }
-

@@ -1,6 +1,7 @@
-import { type NextRequest, NextResponse } from "next/server";
+import { type NextRequest } from "next/server";
 import { z } from "zod";
 
+import { apiJson, apiPreflight } from "@/lib/api-cors";
 import { databaseMode } from "@/lib/db";
 import { getProgress, updateProgress } from "@/lib/progress-store";
 import { getSessionUser } from "@/lib/session";
@@ -14,29 +15,42 @@ const updateSchema = z.object({
   watched: z.boolean(),
 });
 
+export function OPTIONS(request: Request) {
+  return apiPreflight(request, ["GET", "POST"]);
+}
+
 export async function GET(request: NextRequest) {
-  const user = await getSessionUser(request);
-  if (!user) return NextResponse.json({ error: "Not signed in." }, { status: 401 });
-  const progress = await getProgress(user.id);
-  return NextResponse.json({ user, progress, databaseMode: databaseMode() });
+  try {
+    const user = await getSessionUser(request);
+    if (!user) return apiJson(request, { error: "Not signed in." }, { status: 401 });
+    const progress = await getProgress(user.id);
+    return apiJson(request, { user, progress, databaseMode: databaseMode() });
+  } catch {
+    return apiJson(request, { error: "Timeline vault unavailable." }, { status: 500 });
+  }
 }
 
 export async function POST(request: NextRequest) {
-  const user = await getSessionUser(request);
-  if (!user) return NextResponse.json({ error: "Not signed in." }, { status: 401 });
+  let user: Awaited<ReturnType<typeof getSessionUser>>;
+  try {
+    user = await getSessionUser(request);
+  } catch {
+    return apiJson(request, { error: "Timeline vault unavailable." }, { status: 500 });
+  }
+  if (!user) return apiJson(request, { error: "Not signed in." }, { status: 401 });
 
   try {
     const input = updateSchema.parse(await request.json());
     const progress = await updateProgress(user.id, input.contentId, input.episode, input.watched);
-    return NextResponse.json({ progress });
+    return apiJson(request, { progress });
   } catch (error) {
     if (error instanceof z.ZodError) {
-      return NextResponse.json({ error: "Invalid progress update." }, { status: 400 });
+      return apiJson(request, { error: "Invalid progress update." }, { status: 400 });
     }
-    return NextResponse.json(
+    return apiJson(
+      request,
       { error: error instanceof Error ? error.message : "Progress update failed." },
       { status: 409 },
     );
   }
 }
-

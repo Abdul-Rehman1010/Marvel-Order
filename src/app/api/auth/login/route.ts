@@ -2,10 +2,15 @@ import bcrypt from "bcryptjs";
 import { NextResponse } from "next/server";
 import { z } from "zod";
 
+import { apiJson, apiPreflight, isCapacitorRequest, withApiCors } from "@/lib/api-cors";
 import { db, ensureDatabase } from "@/lib/db";
 import { createSession } from "@/lib/session";
 
 export const runtime = "nodejs";
+
+export function OPTIONS(request: Request) {
+  return apiPreflight(request, ["POST"]);
+}
 
 const credentials = z.object({
   username: z.string().trim().min(1),
@@ -22,18 +27,18 @@ export async function POST(request: Request) {
     });
     const row = result.rows[0];
     if (!row || !(await bcrypt.compare(input.password, String(row.password_hash)))) {
-      return NextResponse.json({ error: "Username or password is incorrect." }, { status: 401 });
+      return apiJson(request, { error: "Username or password is incorrect." }, { status: 401 });
     }
 
     const user = { id: String(row.id), username: String(row.username) };
     const response = NextResponse.json({ user });
-    await createSession(user.id, response);
-    return response;
+    const sessionToken = await createSession(user.id, response);
+    if (isCapacitorRequest(request)) response.headers.set("X-Nexus-Session", sessionToken);
+    return withApiCors(request, response);
   } catch (error) {
     if (error instanceof z.ZodError) {
-      return NextResponse.json({ error: "Enter both username and password." }, { status: 400 });
+      return apiJson(request, { error: "Enter both username and password." }, { status: 400 });
     }
-    return NextResponse.json({ error: "Could not sign in." }, { status: 500 });
+    return apiJson(request, { error: "Could not sign in." }, { status: 500 });
   }
 }
-

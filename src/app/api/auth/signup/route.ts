@@ -3,10 +3,15 @@ import bcrypt from "bcryptjs";
 import { NextResponse } from "next/server";
 import { z } from "zod";
 
+import { apiJson, apiPreflight, isCapacitorRequest, withApiCors } from "@/lib/api-cors";
 import { db, ensureDatabase } from "@/lib/db";
 import { createSession } from "@/lib/session";
 
 export const runtime = "nodejs";
+
+export function OPTIONS(request: Request) {
+  return apiPreflight(request, ["POST"]);
+}
 
 const credentials = z.object({
   username: z.string().trim().min(3, "Username must be at least 3 characters.").max(24, "Username must be 24 characters or fewer.").regex(/^[a-zA-Z0-9_-]+$/, "Use only letters, numbers, underscores, and hyphens."),
@@ -26,17 +31,17 @@ export async function POST(request: Request) {
     });
 
     const response = NextResponse.json({ user: { id, username: input.username } }, { status: 201 });
-    await createSession(id, response);
-    return response;
+    const sessionToken = await createSession(id, response);
+    if (isCapacitorRequest(request)) response.headers.set("X-Nexus-Session", sessionToken);
+    return withApiCors(request, response);
   } catch (error) {
     if (error instanceof z.ZodError) {
-      return NextResponse.json({ error: error.issues[0]?.message ?? "Invalid account details." }, { status: 400 });
+      return apiJson(request, { error: error.issues[0]?.message ?? "Invalid account details." }, { status: 400 });
     }
     const message = error instanceof Error ? error.message : "Account creation failed.";
     if (message.toLowerCase().includes("unique")) {
-      return NextResponse.json({ error: "That username is already registered." }, { status: 409 });
+      return apiJson(request, { error: "That username is already registered." }, { status: 409 });
     }
-    return NextResponse.json({ error: "Could not create the account." }, { status: 500 });
+    return apiJson(request, { error: "Could not create the account." }, { status: 500 });
   }
 }
-

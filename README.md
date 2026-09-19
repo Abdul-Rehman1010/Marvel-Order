@@ -68,3 +68,26 @@ TURSO_AUTH_TOKEN=your-token
 4. Deploy. Tables are initialized automatically on first request.
 
 The production build uses Node.js route handlers for password hashing, sessions, database access, and server-authoritative progression checks.
+
+## Android app (Capacitor)
+
+The Android app is a bundled Vite/React frontend that reuses the same `MarvelNexus` component, catalogue, progression rules, and global stylesheet as the web app. Vercel remains the API host and Turso remains the shared database, so accounts and watch progress work across web and Android.
+
+Keep shared product changes in `src/components`, `src/data`, and `src/app/globals.css`. They will be used by both targets; deploy the Next.js app normally for the web, then run `npm run mobile:sync` before building the next Android release.
+
+Create `mobile/.env.local` from `mobile/.env.example` and set the deployed production origin:
+
+```text
+VITE_API_ORIGIN=https://your-production-project.vercel.app
+```
+
+Build and synchronize the Android project:
+
+```bash
+npm run mobile:sync
+npm run mobile:open
+```
+
+`mobile:open` requires Android Studio. On Windows, install Android Studio with its bundled JDK and Android SDK before compiling an APK or Android App Bundle. Do not set Capacitor's `server.url` in production: the app ships its frontend bundle locally and calls only the HTTPS API routes on Vercel.
+
+The web application continues to use its HTTP-only cookie. The Android bundle receives a separate bearer session token from the same login/signup endpoints and stores it through Capacitor Preferences. API requests accept either credential type, and CORS is restricted to Capacitor's local origins plus the local Vite development server.

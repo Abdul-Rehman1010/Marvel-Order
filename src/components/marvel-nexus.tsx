@@ -51,6 +51,9 @@ type RequirementFilter = "all" | "doomsday" | "optional";
 type FormatFilter = "all" | "movie" | "series" | "special";
 type PendingUnwatch = { item: ContentItem; episode: number; newerRecords: ProgressRecord[] };
 type ScrollRequest = { contentId: string; token: number };
+export type NexusApiRequest = (path: string, init?: RequestInit) => Promise<Response>;
+
+const browserApiRequest: NexusApiRequest = (path, init) => fetch(path, init);
 
 const DOOMSDAY = new Date("2026-12-18T00:00:00");
 
@@ -98,7 +101,7 @@ function LoadingScreen() {
   );
 }
 
-function AuthScreen({ onAuthenticated }: { onAuthenticated: () => void }) {
+function AuthScreen({ onAuthenticated, request }: { onAuthenticated: () => void; request: NexusApiRequest }) {
   const [mode, setMode] = useState<"signup" | "login">("signup");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
@@ -110,7 +113,7 @@ function AuthScreen({ onAuthenticated }: { onAuthenticated: () => void }) {
     setError("");
     const form = new FormData(event.currentTarget);
     try {
-      const response = await fetch(`/api/auth/${mode}`, {
+      const response = await request(`/api/auth/${mode}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ username: form.get("username"), password: form.get("password") }),
@@ -493,7 +496,7 @@ function LoreDrawer({ onClose }: { onClose: () => void }) {
   );
 }
 
-export default function MarvelNexus() {
+export default function MarvelNexus({ request = browserApiRequest }: { request?: NexusApiRequest }) {
   const [user, setUser] = useState<User | null>(null);
   const [progress, setProgress] = useState<ProgressRecord[]>([]);
   const [databaseMode, setDatabaseMode] = useState("TIMELINE VAULT");
@@ -517,7 +520,7 @@ export default function MarvelNexus() {
     setLoading(true);
     setLoadError("");
     try {
-      const response = await fetch("/api/progress", { cache: "no-store" });
+      const response = await request("/api/progress", { cache: "no-store" });
       if (response.status === 401) {
         setUser(null);
         setProgress([]);
@@ -537,7 +540,7 @@ export default function MarvelNexus() {
 
   useEffect(() => {
     const controller = new AbortController();
-    fetch("/api/progress", { cache: "no-store", signal: controller.signal })
+    request("/api/progress", { cache: "no-store", signal: controller.signal })
       .then(async (response) => ({ response, payload: await response.json() }))
       .then(({ response, payload }) => {
         if (response.status === 401) {
@@ -557,7 +560,7 @@ export default function MarvelNexus() {
         setLoading(false);
       });
     return () => controller.abort();
-  }, []);
+  }, [request]);
 
   const watched = useMemo(() => new Set(progress.map((record) => progressKey(record.contentId, record.episode))), [progress]);
   const items = universe === "mcu" ? MCU_CONTENT : universe === "xmen" ? XMEN_CONTENT : STREET_CONTENT;
@@ -580,7 +583,7 @@ export default function MarvelNexus() {
     setBusyKey(key);
     setNotice("");
     try {
-      const response = await fetch("/api/progress", {
+      const response = await request("/api/progress", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ contentId: item.id, episode, watched: value }),
@@ -616,7 +619,7 @@ export default function MarvelNexus() {
 
   async function logout() {
     try {
-      const response = await fetch("/api/auth/logout", { method: "POST" });
+      const response = await request("/api/auth/logout", { method: "POST" });
       if (!response.ok) throw new Error("Logout failed");
       setUser(null);
       setProgress([]);
@@ -668,7 +671,7 @@ export default function MarvelNexus() {
 
   if (loading) return <LoadingScreen />;
   if (loadError) return <main className="loading-screen error-screen"><Zap size={34} /><p className="eyebrow">ARCHIVE LINK INTERRUPTED</p><h1>{loadError}</h1><button className="primary-action" onClick={loadProgress}>Retry connection <ArrowRight size={17} /></button></main>;
-  if (!user) return <AuthScreen onAuthenticated={loadProgress} />;
+  if (!user) return <AuthScreen onAuthenticated={loadProgress} request={request} />;
 
   const activeHero = nextUnlocked ?? nextRequired ?? items.at(-1)!;
   const doomsdayComplete = doomsdayStats.watchedUnits === doomsdayStats.totalUnits;

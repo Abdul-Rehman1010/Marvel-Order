@@ -5,8 +5,8 @@
   --text: #f2f5fa; --secondary: #b6c2d4; --muted: #8c9bb1; --border: #334158;
   --global: #a99bff; --mcu: #59d8f5; --xmen: #f4bf69; --street: #f18c9c;
   --complete: #65d6a3; --optional: #e8c477; --error: #ff7d89;
-  --body: var(--font-inter), Inter, system-ui, sans-serif;
-  --display: var(--font-space-grotesk), "Space Grotesk", system-ui, sans-serif;
+  --body: var(--font-inter, Inter), system-ui, sans-serif;
+  --display: var(--font-space-grotesk, "Space Grotesk"), system-ui, sans-serif;
   --shadow: 0 22px 70px rgb(0 0 0 / 28%);
 }
 

@@ -7,9 +7,16 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
+    "mobile:dev": "vite --config mobile/vite.config.ts",
+    "mobile:build": "vite build --config mobile/vite.config.ts",
+    "mobile:sync": "npm run mobile:build && cap sync android",
+    "mobile:open": "cap open android",
     "db:reset-users": "node --env-file-if-exists=.env.local --env-file-if-exists=.env scripts/reset-users.mjs"
   },
   "dependencies": {
+    "@capacitor/android": "^8.5.2",
+    "@capacitor/core": "^8.5.2",
+    "@capacitor/preferences": "^8.0.1",
     "@libsql/client": "^0.18.0",
     "bcryptjs": "^3.0.3",
     "lucide-react": "^1.47.0",
@@ -19,13 +26,18 @@
     "zod": "^4.6.5"
   },
   "devDependencies": {
+    "@capacitor/cli": "^8.5.2",
+    "@fontsource/inter": "^5.3.0",
+    "@fontsource/space-grotesk": "^5.3.0",
     "@tailwindcss/postcss": "^4",
     "@types/node": "^20",
     "@types/react": "^19",
     "@types/react-dom": "^19",
+    "@vitejs/plugin-react": "^6.1.1",
     "eslint": "^9",
     "eslint-config-next": "16.3.5",
     "tailwindcss": "^4",
-    "typescript": "^5"
+    "typescript": "^5",
+    "vite": "^8.3.0"
   }
 }
