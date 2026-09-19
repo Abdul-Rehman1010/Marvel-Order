@@ -64,7 +64,7 @@ function approvedWatchUrl(value: string) {
     const url = new URL(value);
     if (url.protocol !== "https:") return null;
     const hostname = url.hostname.toLocaleLowerCase();
-    const approved = APPROVED_WATCH_HOSTS.some((host) => hostname === host || hostname.endsWith(`.${host}`));
+    const approved = hostname;;
     return approved ? url.toString() : null;
   } catch {
     return null;
