@@ -3,10 +3,12 @@ import "server-only";
 import { createClient } from "@libsql/client";
 
 const databaseUrl = process.env.TURSO_DATABASE_URL ?? "file:marvel-vault.db";
+const databaseAuthToken =
+  process.env.TURSO_AUTH_TOKEN ?? process.env.TURSO_DATABASE_TURSO_AUTH_TOKEN;
 
 export const db = createClient({
   url: databaseUrl,
-  authToken: process.env.TURSO_AUTH_TOKEN,
+  authToken: databaseAuthToken,
 });
 
 let setupPromise: Promise<void> | null = null;
@@ -49,4 +51,3 @@ export function ensureDatabase() {
 export function databaseMode() {
   return databaseUrl.startsWith("file:") ? "LOCAL VAULT" : "SYNCED VAULT";
 }
-
