@@ -1,6 +1,6 @@
 # Mobile scaling implementation plan
 
-Status: planned only; implementation awaits the user's next request.
+Status: implemented on September 19, 2026. Static validation is recorded after the checklist below; live browser screenshots remain unavailable in the current computer-use environment.
 Date: September 19, 2026.
 
 ## Objective and boundaries
@@ -82,3 +82,9 @@ Acceptance criteria:
 - Run ESLint, TypeScript, and a production build, then review before/after screenshots. Static checks alone do not constitute mobile visual verification.
 
 Deliver the responsive changes with representative screenshots and a concise validation report. If browser/device access is unavailable, explicitly record the missing visual checks instead of claiming they passed.
+
+## Implementation record
+
+Implemented the responsive sizing, touch targets, phone gutters, dashboard wrapping, mobile tab labels, archive controls, flexible cards, viewport-safe overlays, episode-row layout, authentication sizing, landscape refinements, and reduced-motion-aware tab scrolling described above. The Progress filter remains removed and application behavior was otherwise preserved.
+
+ESLint, TypeScript, the Next.js production build, and a live HTTP response passed. A headless Chrome render at its reliable 500px minimum viewport confirmed that the authentication layout fits without horizontal clipping. The available computer-use environment exposed no browser surface, and Windows headless Chrome clamps narrower requested viewports before cropping screenshots, so signed-in dashboard screenshots at 320–430px and real iOS/Android keyboard and safe-area checks remain manual follow-ups.

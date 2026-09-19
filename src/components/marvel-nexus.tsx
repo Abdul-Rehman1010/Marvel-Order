@@ -628,7 +628,12 @@ export default function MarvelNexus() {
   useEffect(() => {
     if (!scrollRequest) return;
     const frame = window.requestAnimationFrame(() => {
-      document.getElementById(`timeline-item-${scrollRequest.contentId}`)?.scrollIntoView({ behavior: "smooth", block: "center" });
+      const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+      const phoneLayout = window.matchMedia("(max-width: 580px)").matches;
+      document.getElementById(`timeline-item-${scrollRequest.contentId}`)?.scrollIntoView({
+        behavior: reduceMotion ? "auto" : "smooth",
+        block: phoneLayout ? "start" : "center",
+      });
     });
     return () => window.cancelAnimationFrame(frame);
   }, [scrollRequest, universe]);
@@ -684,7 +689,7 @@ export default function MarvelNexus() {
           <span className="vault-status"><i /> {databaseMode}</span>
           <div className="operator-name"><CircleUserRound size={18} /><div><small>OPERATOR</small><strong>{user.username}</strong></div></div>
           <button className="icon-button" onClick={logout} aria-label="Log out"><LogOut size={17} /></button>
-          <button className="icon-button mobile-menu" onClick={() => setMobileMenu((value) => !value)} aria-label="Open navigation"><Menu size={18} /></button>
+          <button className="icon-button mobile-menu" onClick={() => setMobileMenu((value) => !value)} aria-expanded={mobileMenu} aria-label={mobileMenu ? "Close navigation" : "Open navigation"}><Menu size={18} /></button>
         </div>
       </header>
 
@@ -711,9 +716,9 @@ export default function MarvelNexus() {
         </section>
 
         <div className="universe-switch" role="tablist" aria-label="Universe selector">
-          <button ref={(node) => { tabRefs.current.mcu = node; }} id="mcu-tab" role="tab" aria-selected={universe === "mcu"} aria-controls="timeline-panel" tabIndex={universe === "mcu" ? 0 : -1} className={universe === "mcu" ? "active" : ""} onKeyDown={(event) => handleTabKeyDown(event, "mcu")} onClick={() => selectUniverse("mcu")}><span className="marvel-word">MARVEL</span><div><strong>MCU TIMELINE</strong><small>EARTH-616 + MULTIVERSE</small></div></button>
-          <button ref={(node) => { tabRefs.current.xmen = node; }} id="xmen-tab" role="tab" aria-selected={universe === "xmen"} aria-controls="timeline-panel" tabIndex={universe === "xmen" ? 0 : -1} className={universe === "xmen" ? "active x-active" : ""} onKeyDown={(event) => handleTabKeyDown(event, "xmen")} onClick={() => selectUniverse("xmen")}><span className="x-word">X</span><div><strong>X-MEN UNIVERSE</strong><small>LEGACY MUTANT TIMELINE</small></div></button>
-          <button ref={(node) => { tabRefs.current.street = node; }} id="street-tab" role="tab" aria-selected={universe === "street"} aria-controls="timeline-panel" tabIndex={universe === "street" ? 0 : -1} className={universe === "street" ? "active street-active" : ""} onKeyDown={(event) => handleTabKeyDown(event, "street")} onClick={() => selectUniverse("street")}><span className="street-word">NYC</span><div><strong>STREET-LEVEL SAGA</strong><small>DEFENDERS + NEW YORK LEGACY</small></div></button>
+          <button ref={(node) => { tabRefs.current.mcu = node; }} id="mcu-tab" role="tab" aria-label="MCU timeline" aria-selected={universe === "mcu"} aria-controls="timeline-panel" tabIndex={universe === "mcu" ? 0 : -1} className={universe === "mcu" ? "active" : ""} onKeyDown={(event) => handleTabKeyDown(event, "mcu")} onClick={() => selectUniverse("mcu")}><span className="marvel-word">MARVEL</span><span className="mobile-tab-label">MCU</span><div><strong>MCU TIMELINE</strong><small>EARTH-616 + MULTIVERSE</small></div></button>
+          <button ref={(node) => { tabRefs.current.xmen = node; }} id="xmen-tab" role="tab" aria-label="X-Men universe" aria-selected={universe === "xmen"} aria-controls="timeline-panel" tabIndex={universe === "xmen" ? 0 : -1} className={universe === "xmen" ? "active x-active" : ""} onKeyDown={(event) => handleTabKeyDown(event, "xmen")} onClick={() => selectUniverse("xmen")}><span className="x-word">X</span><span className="mobile-tab-label">X-Men</span><div><strong>X-MEN UNIVERSE</strong><small>LEGACY MUTANT TIMELINE</small></div></button>
+          <button ref={(node) => { tabRefs.current.street = node; }} id="street-tab" role="tab" aria-label="Street-Level saga" aria-selected={universe === "street"} aria-controls="timeline-panel" tabIndex={universe === "street" ? 0 : -1} className={universe === "street" ? "active street-active" : ""} onKeyDown={(event) => handleTabKeyDown(event, "street")} onClick={() => selectUniverse("street")}><span className="street-word">NYC</span><span className="mobile-tab-label">Street</span><div><strong>STREET-LEVEL SAGA</strong><small>DEFENDERS + NEW YORK LEGACY</small></div></button>
           <span className={`switch-track ${universe}`} />
         </div>
 
