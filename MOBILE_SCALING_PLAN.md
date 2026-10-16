@@ -68,7 +68,7 @@ Most changes belong in `src/app/globals.css`. Make small structural or accessibi
 
 ## Verification and acceptance
 
-Test portrait widths of 320, 360, 390, 430, and 768px, a short landscape viewport such as 844 by 390px, and desktop baselines at 1280 and 1440px. Check around 580, 820, and 1120px for abrupt layout failures. Browser emulation covers layout; use real iOS Safari and Android Chrome when available for keyboard and browser-toolbar behavior, and report any untested cases.
+Test portrait widths of 320, 360, 390, 430, and 768px, a short landscape viewport such as 844 by 390px, and desktop baselines at 1280 and 1440px. Check around 580, 820, and 1120px for abrupt layout failures. Browser emulation covers layout; use real mobile browsers when available for keyboard and browser-toolbar behavior, and report any untested cases.
 
 Acceptance criteria:
 
@@ -87,4 +87,4 @@ Deliver the responsive changes with representative screenshots and a concise val
 
 Implemented the responsive sizing, touch targets, phone gutters, dashboard wrapping, mobile tab labels, archive controls, flexible cards, viewport-safe overlays, episode-row layout, authentication sizing, landscape refinements, and reduced-motion-aware tab scrolling described above. The Progress filter remains removed and application behavior was otherwise preserved.
 
-ESLint, TypeScript, the Next.js production build, and a live HTTP response passed. A headless Chrome render at its reliable 500px minimum viewport confirmed that the authentication layout fits without horizontal clipping. The available computer-use environment exposed no browser surface, and Windows headless Chrome clamps narrower requested viewports before cropping screenshots, so signed-in dashboard screenshots at 320–430px and real iOS/Android keyboard and safe-area checks remain manual follow-ups.
+ESLint, TypeScript, the Next.js production build, and a live HTTP response passed. A headless Chrome render at its reliable 500px minimum viewport confirmed that the authentication layout fits without horizontal clipping. The available computer-use environment exposed no browser surface, and Windows headless Chrome clamps narrower requested viewports before cropping screenshots, so signed-in dashboard screenshots at 320–430px and real-device keyboard and safe-area checks remain manual follow-ups.

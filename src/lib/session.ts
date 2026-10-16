@@ -13,11 +13,6 @@ function hashToken(token: string) {
 }
 
 function requestToken(request: NextRequest) {
-  const authorization = request.headers.get("authorization");
-  if (authorization?.startsWith("Bearer ")) {
-    const token = authorization.slice("Bearer ".length).trim();
-    if (token) return token;
-  }
   return request.cookies.get(SESSION_COOKIE)?.value;
 }
 
@@ -39,8 +34,6 @@ export async function createSession(userId: string, response: NextResponse) {
     path: "/",
     maxAge: SESSION_LIFETIME_SECONDS,
   });
-
-  return token;
 }
 
 export async function deleteSession(request: NextRequest, response: NextResponse) {

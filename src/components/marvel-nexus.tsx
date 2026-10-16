@@ -678,7 +678,6 @@ export default function MarvelNexus({ request = browserApiRequest }: { request?:
   const watched = useMemo(() => new Set(progress.map((record) => progressKey(record.contentId, record.episode))), [progress]);
   const items = universe === "mcu" ? MCU_CONTENT : universe === "xmen" ? XMEN_CONTENT : STREET_CONTENT;
   const trackStats = useMemo(() => getStats(items, watched, true), [items, watched]);
-  const localRequiredStats = useMemo(() => getStats(items, watched), [items, watched]);
   const doomsdayStats = useMemo(() => getStats([...MCU_CONTENT, ...XMEN_CONTENT], watched), [watched]);
   const visibleItems = items.filter((item) => {
     if (requirementFilter === "doomsday") return item.required && item.universe !== "street";
@@ -851,7 +850,7 @@ export default function MarvelNexus({ request = browserApiRequest }: { request?:
             <div className="counter-cell"><Star size={18} /><div><small>SPECIALS</small><strong>{trackStats.watchedSpecials}<span> / {trackStats.specials}</span></strong></div></div>
             <div className="counter-cell"><Layers3 size={18} /><div><small>EPISODES LEFT</small><strong>{trackStats.totalEpisodes - trackStats.watchedEpisodes}</strong></div></div>
           </div>
-          <div className={`metric-card runtime-card local-runtime ${universe} glass-panel`}><Clock3 size={19} /><div><small>{universe === "mcu" ? "MCU TIME LEFT" : universe === "xmen" ? "X-MEN TIME LEFT" : "STREET SAGA TIME LEFT"}</small><strong>{formatRuntime(localRequiredStats.remainingRuntime)}</strong><em>{universe === "street" ? "LOCAL • NOT REQUIRED FOR DOOMSDAY" : `LOCAL REQUIRED ${universe === "mcu" ? "MCU" : "X-MEN"} ENTRIES ONLY`}{localRequiredStats.pendingRuntime ? " • PLUS UNRELEASED RUNTIME" : ""}</em></div></div>
+          <div className={`metric-card runtime-card local-runtime ${universe} glass-panel`}><Clock3 size={19} /><div><small>{universe === "mcu" ? "MCU TIME LEFT" : universe === "xmen" ? "X-MEN TIME LEFT" : "STREET SAGA TIME LEFT"}</small><strong>{formatRuntime(trackStats.remainingRuntime)}</strong><em>LOCAL ARCHIVE • OPTIONAL INCLUDED{trackStats.pendingRuntime ? " • PLUS UNRELEASED RUNTIME" : ""}</em></div></div>
         </section>
 
         <section className="next-operation glass-panel">

@@ -203,9 +203,9 @@ const mcu: ContentItem[] = [
   }),
   movie("the-marvels", "The Marvels", "2023-11-10", 105, "Phase Five", "The Marvels"),
   series("what-if-2", "What If…? — Season 2", "2023-12-22", [33, 31, 29, 31, 32, 31, 30, 31, 34], false, "Phase Five", { wikiTitle: "What If...? season 2" }),
-  series("agatha", "Agatha All Along", "2024-09-18", [40, 44, 39, 44, 49, 50, 37, 49, 43], true, "Phase Five", {
+  series("agatha", "Agatha All Along", "2024-09-18", [40, 44, 39, 44, 49, 50, 37, 49, 43], false, "Phase Five", {
     wikiTitle: "Agatha All Along (miniseries)",
-    lore: "Continues the magical consequences of WandaVision and expands the rules surrounding witches and power.",
+    lore: "Optional continuation of WandaVision's magical consequences that expands the rules surrounding witches and power without gating the road to Doomsday.",
   }),
   series("what-if-3", "What If…? — Season 3", "2024-12-22", [32, 31, 33, 31, 34, 32, 31, 36], false, "Phase Five", { wikiTitle: "What If...? season 3" }),
   series("friendly-spider-man-1", "Your Friendly Neighborhood Spider-Man — Season 1", "2025-01-29", [32, 31, 30, 31, 32, 30, 31, 32, 31, 34], false, "Phase Five", { wikiTitle: "Your Friendly Neighborhood Spider-Man" }),
@@ -217,11 +217,11 @@ const mcu: ContentItem[] = [
   series("marvel-zombies", "Marvel Zombies", "2025-09-24", [33, 35, 36, 38], false, "Phase Six", { wikiTitle: "Marvel Zombies (TV series)" }),
   series("wonder-man", "Wonder Man", "2026-01-27", [35, 36, 33, 38, 40, 37, 41, 44], false, "Phase Six", { wikiTitle: "Wonder Man (miniseries)" }),
   movie("brand-new-day", "Spider-Man: Brand New Day", "2026-07-31", 136, "Phase Six", "Spider-Man: Brand New Day"),
-  series("visionquest", "VisionQuest", "2026-10-14", [0, 0, 0, 0, 0, 0, 0, 0], true, "Phase Six", {
+  series("visionquest", "VisionQuest", "2026-10-14", [53, 45, 52, 48, 46, 54, 62, 68], false, "Phase Six", {
     wikiTitle: "VisionQuest (miniseries)",
     summary: "Vision's story continues in the final chapter of the trilogy begun by WandaVision.",
-    lore: "Scheduled before Doomsday and therefore retained as the final required transmission. Episode runtimes will activate when officially published.",
-    dataPending: true,
+    lore: "Optional final chapter of the WandaVision trilogy, available for completionists without gating the road to Doomsday.",
+    episodeTitles: ["No Strings", "Theseus", "Reboot", "Malware", "Firewall", "Deadlock", "Immolation", "Forever"],
   }),
   series("friendly-spider-man-2", "Your Friendly Neighborhood Spider-Man — Season 2", "2026-11-01", [0, 0, 0, 0, 0, 0, 0, 0, 0, 0], false, "Phase Six", {
     wikiTitle: "Your Friendly Neighborhood Spider-Man season 2",
