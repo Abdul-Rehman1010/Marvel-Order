@@ -602,6 +602,13 @@ export function getPrerequisiteChain(item: ContentItem) {
   const added = new Set<string>();
 
   function visit(candidate: ContentItem, visiting: Set<string>) {
+    // Already fully explored via another branch — every item lists ALL of
+    // its prior required titles as direct prerequisites (not just the one
+    // immediately before it), so without this memoization check the same
+    // subtree gets re-explored from every sibling that shares it, doubling
+    // the call count at each level and blowing up exponentially for titles
+    // deep in a universe's catalogue (2^n calls for the nth item).
+    if (added.has(candidate.id)) return;
     if (visiting.has(candidate.id)) return;
     const path = new Set(visiting).add(candidate.id);
 

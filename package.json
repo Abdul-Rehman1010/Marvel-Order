@@ -7,7 +7,8 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "db:reset-users": "node --env-file-if-exists=.env.local --env-file-if-exists=.env scripts/reset-users.mjs"
+    "db:reset-users": "node --env-file-if-exists=.env.local --env-file-if-exists=.env scripts/reset-users.mjs",
+    "tints": "node scripts/extract-poster-tints.mjs"
   },
   "dependencies": {
     "@libsql/client": "^0.18.0",

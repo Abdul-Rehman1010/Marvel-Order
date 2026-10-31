@@ -28,7 +28,7 @@ npm run build
 - *Eternals*, *Agatha All Along*, and *VisionQuest* are optional and do not gate later MCU releases.
 - *Moon Knight* has no prerequisites and can be watched at any time.
 - Archive filters can be combined by Doomsday necessity, format, and unwatched status.
-- Opening a universe tab automatically scrolls to its next required unwatched title.
+- A "Jump to next" pill appears whenever the next required unwatched title scrolls out of view, and jumps straight to it.
 - Removing the latest watched checkpoint is immediate; removing an older checkpoint requires confirmation because dependent progress may also be cleared.
 - X-Men films retain their release-order locks. *Deadpool* requires only *X-Men* (2000), and *Deadpool 2* requires only *Deadpool*. *Deadpool & Wolverine* retains its existing gate: every earlier required X-Men movie plus *Deadpool 2*.
 - *Deadpool 2* and *Deadpool & Wolverine* are optional for universal Doomsday readiness, without changing either movie's prerequisites.
