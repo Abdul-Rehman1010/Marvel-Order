@@ -641,9 +641,8 @@ function DetailDrawer({
           {!prerequisite && !unlocked && <div className="scheduled-alert"><Clock3 size={18} /><div><strong>SCHEDULED RELEASE</strong><p>{reason}</p></div></div>}
           <p className="drawer-summary">{item.summary}</p>
           <div className="lore-brief"><span><Orbit size={16} /> CONTINUITY BRIEF</span><p>{item.lore}</p></div>
-          <WatchSource item={item} url={watchUrl} loaded={watchLinksLoaded} unlocked={unlocked} placement="drawer" />
 
-          {item.kind === "series" ? (
+          {item.kind === "series" && (
             <section className="episode-section">
               <div className="section-heading"><div><p className="eyebrow">EPISODE MATRIX</p><h3>Season progress</h3></div><span>{item.episodes?.filter((episode) => watched.has(progressKey(item.id, episode.id))).length ?? 0}/{item.episodes?.length ?? 0}</span></div>
               <div className="episode-list">
@@ -663,7 +662,11 @@ function DetailDrawer({
                 })}
               </div>
             </section>
-          ) : (
+          )}
+        </div>
+        <div className={`drawer-command-bar ${item.kind === "series" ? "single" : ""}`}>
+          <WatchSource item={item} url={watchUrl} loaded={watchLinksLoaded} unlocked={unlocked} placement="drawer" />
+          {item.kind !== "series" && (
             <button className="primary-action drawer-action" disabled={!unlocked || busyKey === progressKey(item.id)} onClick={() => onToggle(item, -1, !complete)}>
               {complete ? "Remove watched status" : unlocked ? "Mark as watched" : "Complete prerequisite first"}{complete ? <X size={17} /> : <Check size={17} />}
             </button>
