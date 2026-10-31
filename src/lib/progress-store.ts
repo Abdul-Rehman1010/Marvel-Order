@@ -1,6 +1,6 @@
 import "server-only";
 
-import { CONTENT_BY_ID, MCU_CONTENT, STREET_CONTENT, UNIVERSE_CONTENT, type ContentItem } from "@/lib/content";
+import { CONTENT_BY_ID, MCU_CONTENT, UNIVERSE_CONTENT, itemComplete, missingPrerequisite, type ContentItem } from "@/lib/content";
 import { db, ensureDatabase } from "@/lib/db";
 
 export type ProgressRecord = { contentId: string; episode: number };
@@ -21,52 +21,33 @@ export function recordsToSet(records: ProgressRecord[]) {
   return new Set(records.map((record) => `${record.contentId}:${record.episode}`));
 }
 
-function entryComplete(item: ContentItem, watched: Set<string>) {
-  if (item.kind !== "series") return watched.has(`${item.id}:-1`);
-  return (item.episodes ?? []).every((episode) => watched.has(`${item.id}:${episode.id}`));
-}
-
 export function serverUnlockReason(item: ContentItem, watched: Set<string>) {
-  if (item.id === "hawkeye") {
-    const endgame = CONTENT_BY_ID.get("endgame");
-    if (endgame && !entryComplete(endgame, watched)) {
-      return "Complete Avengers: Endgame first to establish Clint Barton's post-Blip story.";
-    }
-  }
-  if (item.id === "deadpool") {
-    const xmen = CONTENT_BY_ID.get("xmen-2000");
-    if (xmen && !entryComplete(xmen, watched)) {
-      return "Complete X-Men (2000) first to establish Deadpool's legacy mutant universe.";
-    }
-  }
-
-  if (item.id === "deadpool-2") {
-    const deadpool = CONTENT_BY_ID.get("deadpool");
-    if (deadpool && !entryComplete(deadpool, watched)) {
-      return "Complete Deadpool first.";
-    }
-  }
-
-  if (!["deadpool", "deadpool-2", "moon-knight"].includes(item.id)) {
-    const list = UNIVERSE_CONTENT[item.universe];
-    const index = list.findIndex((candidate) => candidate.id === item.id);
-    const missing = list
-      .slice(0, index)
-      .filter((candidate) => candidate.required)
-      .find((candidate) => !entryComplete(candidate, watched));
-
-    if (missing) return `Complete ${missing.title} first.`;
-  }
-  if (item.id === "multiverse-of-madness") {
-    const xmen = CONTENT_BY_ID.get("xmen-2000");
-    if (xmen && !entryComplete(xmen, watched)) {
-      return "Complete X-Men (2000) first to establish the legacy mutant continuity.";
-    }
-  }
+  const missing = missingPrerequisite(item, watched);
+  if (missing) return `Complete ${missing.title} first.`;
   if (new Date(`${item.releaseDate}T00:00:00`).getTime() > Date.now()) {
     return `${item.title} has not been released yet.`;
   }
   return null;
+}
+
+async function clearInvalidCompletedItems(userId: string, universe: ContentItem["universe"]) {
+  const current = recordsToSet(await getProgress(userId));
+  let clearedDependent = true;
+
+  while (clearedDependent) {
+    clearedDependent = false;
+    for (const candidate of UNIVERSE_CONTENT[universe]) {
+      if (!itemComplete(candidate, current) || !serverUnlockReason(candidate, current)) continue;
+      await db.execute({
+        sql: "DELETE FROM progress WHERE user_id = ? AND content_id = ?",
+        args: [userId, candidate.id],
+      });
+      for (const key of [...current]) {
+        if (key.startsWith(`${candidate.id}:`)) current.delete(key);
+      }
+      clearedDependent = true;
+    }
+  }
 }
 
 async function clearDependents(userId: string, item: ContentItem, episode: number) {
@@ -77,25 +58,9 @@ async function clearDependents(userId: string, item: ContentItem, episode: numbe
     });
   }
 
-  if (!item.required) return;
-  if (item.universe === "xmen") {
-    const current = recordsToSet(await getProgress(userId));
-    let clearedDependent = true;
-
-    while (clearedDependent) {
-      clearedDependent = false;
-      for (const candidate of UNIVERSE_CONTENT.xmen) {
-        if (!entryComplete(candidate, current) || !serverUnlockReason(candidate, current)) continue;
-        await db.execute({
-          sql: "DELETE FROM progress WHERE user_id = ? AND content_id = ?",
-          args: [userId, candidate.id],
-        });
-        for (const key of [...current]) {
-          if (key.startsWith(`${candidate.id}:`)) current.delete(key);
-        }
-        clearedDependent = true;
-      }
-    }
+  if (!item.required && item.id !== "deadpool-2") return;
+  if (item.universe === "xmen" || item.universe === "street") {
+    await clearInvalidCompletedItems(userId, item.universe);
   } else {
     const list = UNIVERSE_CONTENT[item.universe];
     const index = list.findIndex((candidate) => candidate.id === item.id);
@@ -118,13 +83,7 @@ async function clearDependents(userId: string, item: ContentItem, episode: numbe
   }
 
   if (item.id === "endgame") {
-    const hawkeyeIndex = STREET_CONTENT.findIndex((candidate) => candidate.id === "hawkeye");
-    for (const candidate of STREET_CONTENT.slice(hawkeyeIndex)) {
-      await db.execute({
-        sql: "DELETE FROM progress WHERE user_id = ? AND content_id = ?",
-        args: [userId, candidate.id],
-      });
-    }
+    await clearInvalidCompletedItems(userId, "street");
   }
 }
 

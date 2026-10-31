@@ -236,7 +236,7 @@ function streetSeries(
   runtimes: number[],
   episodeTitles: string[],
   summary: string,
-  lore = "Kept in release order so character introductions, alliances, and the New York underworld develop without spoilers.",
+  lore = "Displayed by release date, while viewing locks follow same-show seasons and explicit crossover dependencies instead of one global chain.",
 ): ContentItem {
   return series(id, title, releaseDate, runtimes, true, "Street-Level Saga", {
     universe: "street",
@@ -378,7 +378,7 @@ const street: ContentItem[] = [
     [59, 49, 45, 48, 52, 49, 48, 51, 58],
     ["Heaven's Half Hour", "Optics", "The Hollow of His Hand", "Sic Semper Systema", "With Interest", "Excessive Force", "Art for Art's Sake", "Isle of Joy", "Straight to Hell"],
     "Matt Murdock pursues justice through his law firm while Wilson Fisk begins a powerful new chapter in New York politics.",
-    "Follows the Defenders-era Daredevil story and the Fisk threads carried through Hawkeye and Echo.",
+    "Requires Daredevil Season 3 to complete Matt Murdock's earlier story. Hawkeye and Echo provide optional Fisk context but are not viewing gates.",
   ),
   streetSeries(
     "born-again-2",
@@ -393,7 +393,7 @@ const street: ContentItem[] = [
     ...special("punisher-one-last-kill", "The Punisher: One Last Kill", "2026-05-12", 52, "Street-Level Saga", "The Punisher: One Last Kill", "Frank Castle returns for a standalone special connected to Marvel's modern street-level story."),
     universe: "street",
     required: true,
-    lore: "Positioned after Daredevil: Born Again Season 2 so its returning characters and New York context arrive in release order.",
+    lore: "Displayed after Daredevil: Born Again Season 2 by release date, while its viewing gate remains The Punisher Season 2.",
   },
 ];
 
@@ -433,10 +433,10 @@ const xmen: ContentItem[] = [
   xmenMovie("deadpool", "Deadpool", "2016-02-12", 108, true, "Deadpool (film)", "Requires X-Men (2000) to establish the legacy mutant universe before Wade Wilson's story begins."),
   xmenMovie("apocalypse", "X-Men: Apocalypse", "2016-05-27", 144, false, "X-Men: Apocalypse", "Optional branch: shown in release position but not required for the Doomsday-ready path."),
   xmenMovie("logan", "Logan", "2017-03-03", 137, true, "Logan (film)"),
-  xmenMovie("deadpool-2", "Deadpool 2", "2018-05-18", 119, true, "Deadpool 2", "Requires Deadpool so Wade Wilson's story and supporting characters carry forward in sequence."),
+  xmenMovie("deadpool-2", "Deadpool 2", "2018-05-18", 119, false, "Deadpool 2", "Optional for Doomsday, but still requires Deadpool so Wade Wilson's story and supporting characters carry forward in sequence."),
   xmenMovie("dark-phoenix", "Dark Phoenix", "2019-06-07", 114, false, "Dark Phoenix (film)", "Optional branch: visible for completionists but never blocks later required mutant entries."),
   xmenMovie("new-mutants", "The New Mutants", "2020-08-28", 94, false, "The New Mutants (film)", "Optional branch: part of the Fox catalogue, but not required for the core Doomsday context."),
-  xmenMovie("deadpool-wolverine", "Deadpool & Wolverine", "2024-07-26", 128, true, "Deadpool & Wolverine", "The final required X-Men checkpoint: complete every earlier required mutant film through Deadpool 2. Optional films remain safe to skip."),
+  xmenMovie("deadpool-wolverine", "Deadpool & Wolverine", "2024-07-26", 128, false, "Deadpool & Wolverine", "Optional for Doomsday, but its spoiler-safe gate remains: complete every earlier required mutant film plus Deadpool 2."),
 ];
 
 const MOVIE_SUMMARIES: Record<string, string> = {
@@ -511,6 +511,33 @@ export const UNIVERSE_CONTENT: Record<Universe, ContentItem[]> = {
 
 export const CONTENT_BY_ID = new Map(CONTENT.map((item) => [item.id, item]));
 
+const STREET_PREREQUISITE_IDS: Record<string, string[]> = {
+  "defenders-daredevil-1": [],
+  "defenders-jessica-jones-1": [],
+  "defenders-daredevil-2": ["defenders-daredevil-1"],
+  "defenders-luke-cage-1": [],
+  "defenders-iron-fist-1": [],
+  "defenders-the-defenders": [
+    "defenders-daredevil-1",
+    "defenders-daredevil-2",
+    "defenders-jessica-jones-1",
+    "defenders-luke-cage-1",
+    "defenders-iron-fist-1",
+  ],
+  "defenders-punisher-1": ["defenders-daredevil-2"],
+  "defenders-jessica-jones-2": ["defenders-jessica-jones-1", "defenders-the-defenders"],
+  "defenders-luke-cage-2": ["defenders-luke-cage-1", "defenders-the-defenders"],
+  "defenders-iron-fist-2": ["defenders-iron-fist-1", "defenders-the-defenders"],
+  "defenders-daredevil-3": ["defenders-daredevil-2", "defenders-the-defenders"],
+  "defenders-punisher-2": ["defenders-punisher-1"],
+  "defenders-jessica-jones-3": ["defenders-jessica-jones-2", "defenders-the-defenders"],
+  hawkeye: [],
+  echo: ["hawkeye"],
+  "born-again-1": ["defenders-daredevil-3"],
+  "born-again-2": ["born-again-1"],
+  "punisher-one-last-kill": ["defenders-punisher-2"],
+};
+
 export function progressKey(contentId: string, episode = -1) {
   return `${contentId}:${episode}`;
 }
@@ -525,71 +552,96 @@ export function itemComplete(item: ContentItem, watched: Set<string>) {
 }
 
 export function priorRequiredItems(item: ContentItem) {
+  if (item.universe === "street") {
+    return (STREET_PREREQUISITE_IDS[item.id] ?? []).flatMap((id) => {
+      const prerequisite = CONTENT_BY_ID.get(id);
+      return prerequisite ? [prerequisite] : [];
+    });
+  }
   if (["deadpool", "deadpool-2", "moon-knight"].includes(item.id)) return [];
   const universeItems = UNIVERSE_CONTENT[item.universe];
   const index = universeItems.findIndex((candidate) => candidate.id === item.id);
-  return universeItems.slice(0, index).filter((candidate) => candidate.required);
+  return universeItems
+    .slice(0, index)
+    .filter((candidate) => candidate.required || (item.id === "deadpool-wolverine" && candidate.id === "deadpool-2"));
 }
 
-export function missingPrerequisite(item: ContentItem, watched: Set<string>) {
+function directPrerequisiteItems(item: ContentItem) {
+  const prerequisites: ContentItem[] = [];
+  const included = new Set<string>();
+  const add = (candidate: ContentItem | undefined) => {
+    if (candidate && !included.has(candidate.id)) {
+      included.add(candidate.id);
+      prerequisites.push(candidate);
+    }
+  };
+
   if (item.id === "hawkeye") {
-    const endgame = CONTENT_BY_ID.get("endgame");
-    if (endgame && !itemComplete(endgame, watched)) return endgame;
+    add(CONTENT_BY_ID.get("endgame"));
   }
 
   if (item.id === "deadpool") {
-    const xmenFirst = CONTENT_BY_ID.get("xmen-2000");
-    if (xmenFirst && !itemComplete(xmenFirst, watched)) return xmenFirst;
+    add(CONTENT_BY_ID.get("xmen-2000"));
   }
 
   if (item.id === "deadpool-2") {
-    const deadpool = CONTENT_BY_ID.get("deadpool");
-    if (deadpool && !itemComplete(deadpool, watched)) return deadpool;
+    add(CONTENT_BY_ID.get("deadpool"));
   }
 
-  const missingPrior = priorRequiredItems(item).find((candidate) => !itemComplete(candidate, watched));
-  if (missingPrior) return missingPrior;
+  for (const prerequisite of priorRequiredItems(item)) add(prerequisite);
 
   if (item.id === "multiverse-of-madness") {
-    const xmenFirst = CONTENT_BY_ID.get("xmen-2000");
-    if (xmenFirst && !itemComplete(xmenFirst, watched)) return xmenFirst;
+    add(CONTENT_BY_ID.get("xmen-2000"));
+  }
+
+  return prerequisites;
+}
+
+export function getPrerequisiteChain(item: ContentItem) {
+  const chain: ContentItem[] = [];
+  const added = new Set<string>();
+
+  function visit(candidate: ContentItem, visiting: Set<string>) {
+    if (visiting.has(candidate.id)) return;
+    const path = new Set(visiting).add(candidate.id);
+
+    for (const prerequisite of directPrerequisiteItems(candidate)) {
+      visit(prerequisite, path);
+    }
+
+    if (!added.has(candidate.id)) {
+      added.add(candidate.id);
+      chain.push(candidate);
+    }
+  }
+
+  visit(item, new Set());
+  return chain;
+}
+
+function findMissingPrerequisite(item: ContentItem, watched: Set<string>, visiting: Set<string>): ContentItem | null {
+  if (visiting.has(item.id)) return null;
+  const path = new Set(visiting).add(item.id);
+
+  for (const prerequisite of directPrerequisiteItems(item)) {
+    if (itemComplete(prerequisite, watched) || path.has(prerequisite.id)) continue;
+    return findMissingPrerequisite(prerequisite, watched, path) ?? prerequisite;
   }
 
   return null;
 }
 
+export function missingPrerequisite(item: ContentItem, watched: Set<string>) {
+  return findMissingPrerequisite(item, watched, new Set());
+}
+
 export function unlockReason(item: ContentItem, watched: Set<string>) {
-  if (item.id === "hawkeye") {
-    const endgame = CONTENT_BY_ID.get("endgame");
-    if (endgame && !itemComplete(endgame, watched)) {
-      return "Requires Avengers: Endgame so Clint Barton's situation, the Ronin history, and the post-Blip world are understood without spoilers.";
+  const missing = missingPrerequisite(item, watched);
+  if (missing) {
+    if (item.universe === "street") {
+      return `Complete ${missing.title} next; it is the earliest unfinished prerequisite in this character or crossover path.`;
     }
-  }
-
-  if (item.id === "deadpool") {
-    const xmenFirst = CONTENT_BY_ID.get("xmen-2000");
-    if (xmenFirst && !itemComplete(xmenFirst, watched)) {
-      return "Requires X-Men (2000) to establish the legacy mutant universe before Deadpool's story begins.";
-    }
-  }
-
-  if (item.id === "deadpool-2") {
-    const deadpool = CONTENT_BY_ID.get("deadpool");
-    if (deadpool && !itemComplete(deadpool, watched)) {
-      return "Requires Deadpool so Wade Wilson's story and supporting characters continue in order.";
-    }
-  }
-
-  const missingPrior = priorRequiredItems(item).find((candidate) => !itemComplete(candidate, watched));
-  if (missingPrior) {
-    return `Requires ${missingPrior.title} to preserve release-order context and prevent character or event spoilers.`;
-  }
-
-  if (item.id === "multiverse-of-madness") {
-    const xmenFirst = CONTENT_BY_ID.get("xmen-2000");
-    if (xmenFirst && !itemComplete(xmenFirst, watched)) {
-      return "Requires X-Men (2000) to establish Charles Xavier, the mutant team, and the legacy mutant continuity before the MCU directly engages alternate Marvel universes.";
-    }
+    return `Complete ${missing.title} next; it is the earliest unfinished prerequisite for ${item.title}.`;
   }
 
   const releaseMoment = new Date(`${item.releaseDate}T00:00:00`).getTime();

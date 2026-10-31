@@ -4,7 +4,9 @@ import Image from "next/image";
 import {
   ArrowRight,
   Check,
+  ChevronDown,
   ChevronRight,
+  ChevronUp,
   CircleUserRound,
   Clock3,
   Database,
@@ -32,6 +34,7 @@ import { FormEvent, Fragment, KeyboardEvent, useEffect, useMemo, useRef, useStat
 import {
   CONTENT,
   CONTENT_BY_ID,
+  getPrerequisiteChain,
   MCU_CONTENT,
   STREET_CONTENT,
   XMEN_CONTENT,
@@ -251,7 +254,7 @@ function Countdown() {
   );
 }
 
-function getStats(items: ContentItem[], watched: Set<string>, includeOptional = false) {
+function getStats(items: ContentItem[], watched: Set<string>, includeOptional = false, percentByRuntime = false) {
   const trackedItems = includeOptional ? items : items.filter((item) => item.required);
   const totalUnits = trackedItems.reduce((sum, item) => sum + itemUnits(item), 0);
   let watchedUnits = 0;
@@ -286,9 +289,13 @@ function getStats(items: ContentItem[], watched: Set<string>, includeOptional = 
   const watchedSeries = seriesItems.filter((item) => itemComplete(item, watched)).length;
   const specials = trackedItems.filter((item) => item.kind === "special");
   const watchedSpecials = specials.filter((item) => itemComplete(item, watched)).length;
+  const totalRuntime = watchedRuntime + remainingRuntime;
+  const progressRatio = percentByRuntime
+    ? (totalRuntime ? watchedRuntime / totalRuntime : 0)
+    : (totalUnits ? watchedUnits / totalUnits : 0);
 
   return {
-    percent: totalUnits ? (watchedUnits === totalUnits ? 100 : Math.min(99, Math.round((watchedUnits / totalUnits) * 100))) : 0,
+    percent: totalUnits ? (watchedUnits === totalUnits ? 100 : Math.min(99, Math.round(progressRatio * 100))) : 0,
     totalUnits,
     watchedUnits,
     remainingRuntime,
@@ -310,6 +317,21 @@ function ProgressRing({ value }: { value: number }) {
     <div className="progress-ring" style={{ "--progress": `${value * 3.6}deg` } as React.CSSProperties}>
       <div><strong>{value}%</strong><span>SYNCED</span></div>
     </div>
+  );
+}
+
+function CheckpointCounts({ watched, total }: { watched: number; total: number }) {
+  return (
+    <dl className="checkpoint-counts" aria-label={`${watched} items watched, ${Math.max(0, total - watched)} items remaining`}>
+      <div className="watched-count">
+        <dt><Check size={13} /> Watched</dt>
+        <dd>{watched}</dd>
+      </div>
+      <div className="remaining-count">
+        <dt><Clock3 size={13} /> Remaining</dt>
+        <dd>{Math.max(0, total - watched)}</dd>
+      </div>
+    </dl>
   );
 }
 
@@ -434,8 +456,10 @@ function TimelineCard({
         <h3>{item.title}</h3>
         <p className="card-phase">{item.phase}</p>
         <p className="card-summary">{item.summary}</p>
-        {!unlocked && <div className="card-lock-note"><LockKeyhole size={15} /><span><strong>Locked:</strong> {reason}</span></div>}
-        {prerequisite && <button className="prerequisite-link" onClick={() => onOpenPrerequisite(prerequisite)}>Open {prerequisite.title} <ChevronRight size={14} /></button>}
+        <div className={`card-availability ${unlocked ? "ready" : "locked"}`} aria-label={unlocked ? `${item.title} is ready to watch` : `Locked: ${reason}`}>
+          <span>{unlocked ? <Check size={14} /> : <LockKeyhole size={14} />}{unlocked ? "Ready to watch" : "Locked"}</span>
+          {!unlocked && prerequisite && <button title={`Open ${prerequisite.title}`} onClick={() => onOpenPrerequisite(prerequisite)}><span>Open {prerequisite.title}</span><ChevronRight size={14} /></button>}
+        </div>
         {!item.required && <p className="optional-note">Optional entry · excluded from Doomsday readiness</p>}
         <WatchSource item={item} url={watchUrl} loaded={watchLinksLoaded} unlocked={unlocked} placement="card" />
         {item.kind === "series" ? (
@@ -449,6 +473,125 @@ function TimelineCard({
         )}
       </div>
     </article>
+  );
+}
+
+function PrerequisiteChain({
+  item,
+  watched,
+  onOpenPrerequisite,
+}: {
+  item: ContentItem;
+  watched: Set<string>;
+  onOpenPrerequisite: (item: ContentItem) => void;
+}) {
+  const [expanded, setExpanded] = useState(false);
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const focusRef = useRef<HTMLLIElement>(null);
+  const chain = useMemo(() => getPrerequisiteChain(item), [item]);
+  const prerequisites = chain.slice(0, -1);
+  const next = missingPrerequisite(item, watched);
+  const selectedUnlocked = isUnlocked(item, watched);
+  const completedPrerequisites = prerequisites.filter((candidate) => itemComplete(candidate, watched)).length;
+  const nextIndex = next ? chain.findIndex((candidate) => candidate.id === next.id) : -1;
+  const previewStart = nextIndex >= 0 ? nextIndex : Math.max(0, chain.length - 3);
+  const previewRows = chain.slice(previewStart, previewStart + 3);
+  const visibleRows = expanded ? chain : previewRows;
+  const canExpand = previewRows.length !== chain.length;
+  const focusId = chain[previewStart]?.id;
+  const listId = `viewing-path-${item.id}`;
+
+  useEffect(() => {
+    if (!expanded) return;
+    const frame = window.requestAnimationFrame(() => {
+      const container = scrollRef.current;
+      const anchor = focusRef.current;
+      if (!container || !anchor) return;
+      const offset = anchor.getBoundingClientRect().top - container.getBoundingClientRect().top;
+      container.scrollTop += offset - 8;
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [expanded, item.id]);
+
+  if (!prerequisites.length) {
+    return (
+      <section className="viewing-path compact complete" aria-label="Viewing path">
+        <Check size={18} />
+        <div><strong>No prerequisites</strong><p>No prerequisite viewing is required for this title.</p></div>
+      </section>
+    );
+  }
+
+  return (
+    <section className={`viewing-path ${next ? "locked" : "complete"}`} aria-labelledby={`${listId}-title`}>
+      <header className="viewing-path-header">
+        <div>
+          <span>VIEWING PATH</span>
+          <strong id={`${listId}-title`}>{next ? "Prerequisites remaining" : "Prerequisites complete"}</strong>
+          <p>{next ? `Start with ${next.title}.` : "Everything required for this title has been watched."}</p>
+        </div>
+        <span>{completedPrerequisites}/{prerequisites.length}</span>
+      </header>
+
+      <div ref={scrollRef} className={`viewing-path-scroll ${expanded ? "expanded" : "collapsed"}`}>
+        <ol id={listId} className="viewing-path-list">
+          {visibleRows.map((chainItem) => {
+            const complete = itemComplete(chainItem, watched);
+            const selected = chainItem.id === item.id;
+            const watchNext = chainItem.id === next?.id;
+            const scheduled = selected && !next && !selectedUnlocked;
+            const tone = complete || (selected && selectedUnlocked) ? "complete" : scheduled ? "scheduled" : "pending";
+            const watchedEpisodes = chainItem.kind === "series"
+              ? chainItem.episodes?.filter((episode) => watched.has(progressKey(chainItem.id, episode.id))).length ?? 0
+              : 0;
+            const status = selected
+              ? complete ? "Watched" : selectedUnlocked ? "Ready to watch" : scheduled ? "Scheduled" : "Locked"
+              : complete ? "Watched" : watchNext ? "Watch next" : "Still required";
+            const rowContent = (
+              <>
+                <span className="viewing-path-marker">
+                  {tone === "complete" ? <Check size={14} /> : watchNext ? <Play size={13} /> : scheduled ? <Clock3 size={14} /> : <LockKeyhole size={13} />}
+                </span>
+                <span className="viewing-path-copy">
+                  <strong>{chainItem.title}</strong>
+                  <small>{chainItem.kind === "series" ? `${watchedEpisodes}/${chainItem.episodes?.length ?? 0} episodes` : chainItem.kind}{selected ? " · Your selection" : ""}</small>
+                </span>
+                <span className="viewing-path-status">{status}</span>
+                {!selected && <ChevronRight size={15} />}
+              </>
+            );
+
+            return (
+              <li
+                key={chainItem.id}
+                ref={expanded && chainItem.id === focusId ? focusRef : undefined}
+                className={`${tone} ${watchNext ? "watch-next" : ""} ${selected ? "selected" : ""}`}
+                aria-current={watchNext ? "step" : undefined}
+              >
+                {selected ? <div className="viewing-path-row">{rowContent}</div> : (
+                  <button type="button" className="viewing-path-row" onClick={() => onOpenPrerequisite(chainItem)} aria-label={`${status}: open ${chainItem.title}`}>
+                    {rowContent}
+                  </button>
+                )}
+              </li>
+            );
+          })}
+        </ol>
+      </div>
+
+      {canExpand && (
+        <button
+          type="button"
+          className="viewing-path-toggle"
+          aria-expanded={expanded}
+          aria-controls={listId}
+          onClick={() => setExpanded((current) => !current)}
+        >
+          {expanded ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
+          {expanded ? "Collapse path" : `Show full path · ${chain.length} titles`}
+        </button>
+      )}
+    </section>
   );
 }
 
@@ -494,7 +637,8 @@ function DetailDrawer({
         <div className="drawer-content">
           {!item.required && <div className="optional-explainer"><Star size={18} /><div><strong>OPTIONAL TRANSMISSION</strong><p>This entry is available for completionists, but skipping it will not lock any required movie or series.</p></div></div>}
           {item.recommendation && <div className="developer-pick"><Star size={19} fill="currentColor" /><div><strong>DEVELOPER&apos;S RECOMMENDATION</strong><p>{item.recommendation}</p></div></div>}
-          {!unlocked && <div className="prerequisite-alert"><LockKeyhole size={18} /><div><strong>PREREQUISITE REQUIRED</strong><p>{reason}</p>{prerequisite && <button onClick={() => onOpenPrerequisite(prerequisite)}>Open {prerequisite.title} <ChevronRight size={14} /></button>}</div></div>}
+          <PrerequisiteChain item={item} watched={watched} onOpenPrerequisite={onOpenPrerequisite} />
+          {!prerequisite && !unlocked && <div className="scheduled-alert"><Clock3 size={18} /><div><strong>SCHEDULED RELEASE</strong><p>{reason}</p></div></div>}
           <p className="drawer-summary">{item.summary}</p>
           <div className="lore-brief"><span><Orbit size={16} /> CONTINUITY BRIEF</span><p>{item.lore}</p></div>
           <WatchSource item={item} url={watchUrl} loaded={watchLinksLoaded} unlocked={unlocked} placement="drawer" />
@@ -576,9 +720,9 @@ function LoreDrawer({ onClose }: { onClose: () => void }) {
         </div>
         <div className="drawer-content lore-copy">
           <section><span>01</span><div><h3>Release order is the protection layer</h3><p>The MCU chain interleaves films and required series by release. Character reveals, post-credit scenes, and shifting alliances therefore land in their intended order. Optional transmissions appear in position but never become gates.</p></div></section>
-          <section><span>02</span><div><h3>Mutant release order and the Deadpool exception</h3><p>The X-Men films retain their release-order locks. Deadpool requires only X-Men (2000), and Deadpool 2 requires only Deadpool. Deadpool &amp; Wolverine then rejoins the normal release-order gate and requires every earlier non-optional X-Men film.</p></div></section>
+          <section><span>02</span><div><h3>Mutant release order and the Deadpool exception</h3><p>The X-Men films retain their release-order locks. Deadpool requires only X-Men (2000), and Deadpool 2 requires only Deadpool. Deadpool &amp; Wolverine keeps its existing gate: every earlier required X-Men film plus Deadpool 2. The latter two Deadpool films remain optional for Doomsday.</p></div></section>
           <section><span>03</span><div><h3>The Multiverse of Madness bridge</h3><p>Before Doctor Strange enters the Multiverse of Madness, X-Men (2000) must be complete. It establishes Charles Xavier, the mutant team, and the legacy universe needed to understand a major alternate-reality connection.</p></div></section>
-          <section><span>04</span><div><h3>The street-level chain</h3><p>The Defenders-era seasons, Hawkeye, Echo, and Daredevil: Born Again form their own release-order track. Hawkeye additionally requires Avengers: Endgame, but completing Hawkeye is never required to continue the MCU timeline.</p></div></section>
+          <section><span>04</span><div><h3>Street-level story paths</h3><p>The New York archive is displayed by release date, but unrelated shows can be watched independently. Seasons stay in order within each show. The Defenders requires the four heroes&apos; setup seasons, then gates their later seasons; Punisher, Hawkeye and Echo, Daredevil: Born Again, and One Last Kill follow their explicit story prerequisites.</p></div></section>
           <section><span>05</span><div><h3>Doomsday readiness rule</h3><p>Before watching Avengers: Doomsday, complete every non-optional MCU entry and every non-optional X-Men entry. The universal progress ring excludes optional content and the Street-Level Saga. Each tab has a separate archive-completion ring that includes its optional movies and seasons.</p></div></section>
           <section><span>06</span><div><h3>TVA and the road to Doomsday</h3><p>Loki establishes branching timelines and the TVA; later stories expose collisions between realities. Deadpool &amp; Wolverine becomes a shared bridge, while The Fantastic Four: First Steps adds another universe converging toward Doomsday.</p></div></section>
           <div className="protocol-note"><ShieldCheck size={18} /><p>This brief is spoiler-controlled. Entry-specific files reveal only the context needed to understand why an item occupies its position.</p></div>
@@ -596,6 +740,7 @@ export default function MarvelNexus({ request = browserApiRequest }: { request?:
   const [universe, setUniverse] = useState<Universe>("mcu");
   const [requirementFilter, setRequirementFilter] = useState<RequirementFilter>("all");
   const [formatFilter, setFormatFilter] = useState<FormatFilter>("all");
+  const [unwatchedOnly, setUnwatchedOnly] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [selected, setSelected] = useState<ContentItem | null>(null);
   const [loreOpen, setLoreOpen] = useState(false);
@@ -677,14 +822,17 @@ export default function MarvelNexus({ request = browserApiRequest }: { request?:
 
   const watched = useMemo(() => new Set(progress.map((record) => progressKey(record.contentId, record.episode))), [progress]);
   const items = universe === "mcu" ? MCU_CONTENT : universe === "xmen" ? XMEN_CONTENT : STREET_CONTENT;
-  const trackStats = useMemo(() => getStats(items, watched, true), [items, watched]);
-  const doomsdayStats = useMemo(() => getStats([...MCU_CONTENT, ...XMEN_CONTENT], watched), [watched]);
+  const trackStats = useMemo(() => getStats(items, watched, true, true), [items, watched]);
+  const doomsdayStats = useMemo(() => getStats([...MCU_CONTENT, ...XMEN_CONTENT], watched, false, true), [watched]);
   const visibleItems = items.filter((item) => {
     if (requirementFilter === "doomsday") return item.required && item.universe !== "street";
     if (requirementFilter === "optional") return !item.required;
     return true;
   }).filter((item) => {
     if (formatFilter !== "all") return item.kind === formatFilter;
+    return true;
+  }).filter((item) => {
+    if (unwatchedOnly) return !itemComplete(item, watched);
     return true;
   }).filter((item) => item.title.toLocaleLowerCase().includes(searchQuery.trim().toLocaleLowerCase()));
   const nextRequired = items.find((item) => item.required && !itemComplete(item, watched));
@@ -759,6 +907,7 @@ export default function MarvelNexus({ request = browserApiRequest }: { request?:
     setUniverse(nextUniverse);
     setRequirementFilter("all");
     setFormatFilter("all");
+    setUnwatchedOnly(false);
     setSearchQuery("");
     if (scrollToNext && nextItem) {
       scrollToken.current += 1;
@@ -817,7 +966,7 @@ export default function MarvelNexus({ request = browserApiRequest }: { request?:
           <div className="hero-copy">
             <p className="eyebrow"><span className="pulse-dot" /> ACTIVE MISSION // {universe === "mcu" ? "EARTH-616" : universe === "xmen" ? "LEGACY MUTANT" : "STREET-LEVEL"}</p>
             <h1>Road to <em>Doomsday</em></h1>
-            <p>{universe === "xmen" ? "Follow the mutant release order; Deadpool and Deadpool 2 use focused exceptions before the final crossover rejoins the main gate." : "Complete every required transmission in release order. The timeline will protect you from what comes next."}</p>
+            <p>{universe === "xmen" ? "Follow the mutant release order; Deadpool and Deadpool 2 use focused exceptions, while Deadpool 2 and Deadpool & Wolverine remain optional for Doomsday without losing their prerequisites." : universe === "street" ? "Follow each hero's seasons in order and meet the explicit crossover gates; unrelated New York stories can be watched independently." : "Complete every required transmission in release order. The timeline will protect you from what comes next."}</p>
           </div>
           <Countdown />
         </div>
@@ -827,7 +976,7 @@ export default function MarvelNexus({ request = browserApiRequest }: { request?:
         <section className="progress-overview global-status-row">
           <div className="status-primary doomsday-progress glass-panel">
             <ProgressRing value={doomsdayStats.percent} />
-            <div className="status-copy"><div className="status-label"><p className="eyebrow">UNIVERSAL DOOMSDAY READINESS</p><span>GLOBAL</span></div><h2>{doomsdayComplete ? "Doomsday protocol complete" : "Mission in progress"}</h2><p>{doomsdayStats.watchedUnits} of {doomsdayStats.totalUnits} required checkpoints · {doomsdayStats.movies} movies + {doomsdayStats.specials} specials + {doomsdayStats.totalEpisodes} episodes</p><div className="linear-progress"><span style={{ width: `${doomsdayStats.percent}%` }} /></div></div>
+            <div className="status-copy"><div className="status-label"><p className="eyebrow">UNIVERSAL DOOMSDAY READINESS</p><span>GLOBAL</span></div><h2>{doomsdayComplete ? "Doomsday protocol complete" : "Mission in progress"}</h2><p>{doomsdayStats.movies} movies + {doomsdayStats.specials} specials + {doomsdayStats.totalEpisodes} episodes · required checkpoints</p><CheckpointCounts watched={doomsdayStats.watchedUnits} total={doomsdayStats.totalUnits} /></div>
           </div>
           <div className="metric-card runtime-card doomsday-runtime glass-panel"><Clock3 size={22} /><div><span className="scope-pill">GLOBAL</span><small>DOOMSDAY WATCH TIME LEFT</small><strong>{formatRuntime(doomsdayStats.remainingRuntime)}</strong><em>MCU + X-MEN REQUIRED ONLY{doomsdayStats.pendingRuntime ? " · PLUS UNRELEASED RUNTIME" : ""}</em></div></div>
         </section>
@@ -842,7 +991,7 @@ export default function MarvelNexus({ request = browserApiRequest }: { request?:
         <section className="status-deck metric-deck local-status-row">
           <div className="status-primary track-status glass-panel">
             <ProgressRing value={trackStats.percent} />
-            <div className="status-copy"><p className="eyebrow">CURRENT TAB ARCHIVE</p><h2>{universe === "mcu" ? "MCU completion" : universe === "xmen" ? "X-Men completion" : "Street Saga completion"}</h2><p>{trackStats.watchedUnits} of {trackStats.totalUnits} checkpoints • {trackStats.movies} movies + {trackStats.specials} specials + {trackStats.totalEpisodes} episodes • optional included</p><div className="linear-progress"><span style={{ width: `${trackStats.percent}%` }} /></div></div>
+            <div className="status-copy"><p className="eyebrow">CURRENT TAB ARCHIVE</p><h2>{universe === "mcu" ? "MCU completion" : universe === "xmen" ? "X-Men completion" : "Street Saga completion"}</h2><p>{trackStats.movies} movies + {trackStats.specials} specials + {trackStats.totalEpisodes} episodes • optional included</p><CheckpointCounts watched={trackStats.watchedUnits} total={trackStats.totalUnits} /></div>
           </div>
           <div className="counter-grid glass-panel">
             <div className="counter-cell"><Film size={18} /><div><small>MOVIES</small><strong>{trackStats.watchedMovies}<span> / {trackStats.movies}</span></strong></div></div>
@@ -877,6 +1026,9 @@ export default function MarvelNexus({ request = browserApiRequest }: { request?:
               <div className="filter-group"><span>Format</span><div className="filter-row" aria-label="Filter by format">
                 {([['all', 'All'], ['movie', 'Movies'], ['series', 'TV shows'], ['special', 'Specials']] as [FormatFilter, string][]).map(([value, label]) => <button key={value} aria-pressed={formatFilter === value} className={formatFilter === value ? "active" : ""} onClick={() => setFormatFilter(value)}>{label}</button>)}
               </div></div>
+              <div className="filter-group"><span>Progress</span><div className="filter-row progress-filter" aria-label="Filter by viewing progress">
+                <button aria-pressed={unwatchedOnly} className={unwatchedOnly ? "active" : ""} onClick={() => setUnwatchedOnly((current) => !current)}>Unwatched</button>
+              </div></div>
             </div>
           </div>
         </div>
@@ -898,13 +1050,13 @@ export default function MarvelNexus({ request = browserApiRequest }: { request?:
               />
             </Fragment>
           ))}
-          {!visibleItems.length && <div className="empty-state"><Search size={28} /><h3>No transmissions found</h3><p>Try another title or clear the active filters.</p><button onClick={() => { setSearchQuery(""); setRequirementFilter("all"); setFormatFilter("all"); }}>Reset archive view</button></div>}
+          {!visibleItems.length && <div className="empty-state"><Search size={28} /><h3>No transmissions found</h3><p>Try another title or clear the active filters.</p><button onClick={() => { setSearchQuery(""); setRequirementFilter("all"); setFormatFilter("all"); setUnwatchedOnly(false); }}>Reset archive view</button></div>}
         </section>
       </section>
 
       <footer><div className="brand-lockup compact"><div className="brand-mark"><span>D</span></div><div><strong>DOOM FLIX</strong><small>WATCH PROTOCOL</small></div></div><p>Personal viewing archive • Release-order spoiler protection active</p><span><Database size={14} /> {CONTENT.length} transmissions indexed</span></footer>
 
-      {selected && <DetailDrawer item={selected} watched={watched} busyKey={busyKey} onClose={() => setSelected(null)} onOpenPrerequisite={openArchiveItem} onToggle={toggle} watchUrl={watchCatalogue.links.get(normalizeWatchTitle(selected.title))} watchLinksLoaded={watchCatalogue.loaded} />}
+      {selected && <DetailDrawer key={selected.id} item={selected} watched={watched} busyKey={busyKey} onClose={() => setSelected(null)} onOpenPrerequisite={openArchiveItem} onToggle={toggle} watchUrl={watchCatalogue.links.get(normalizeWatchTitle(selected.title))} watchLinksLoaded={watchCatalogue.loaded} />}
       {loreOpen && <LoreDrawer onClose={() => setLoreOpen(false)} />}
       {pendingUnwatch && <UnwatchConfirmation pending={pendingUnwatch} onCancel={() => setPendingUnwatch(null)} onConfirm={confirmUnwatch} />}
       {notice && <div className="toast" role="status" aria-live="polite"><Zap size={16} /> {notice}</div>}
