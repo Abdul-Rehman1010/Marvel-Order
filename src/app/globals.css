@@ -731,7 +731,7 @@ footer > span { display: flex; align-items: center; gap: 6px; }
 
 /* ===== Lore experience: full-screen, scroll-driven guide ===== */
 
-.lore-shell { position: fixed; inset: 0; z-index: 120; background: var(--canvas); color: var(--text); overflow: hidden; touch-action: pan-y; animation: lore-in 320ms var(--ease-out-expo) both; --lore-accent: var(--mcu); }
+.lore-shell { position: fixed; inset: 0; z-index: 120; background: var(--canvas); color: var(--text); overflow: hidden; touch-action: pan-y; animation: lore-in 320ms var(--ease-out-expo) both; --lore-accent: var(--mcu); --lore-bar-h: calc(60px + env(safe-area-inset-top, 0px)); }
 .lore-shell[data-tone="optional"] { --lore-accent: var(--gold); }
 .lore-shell[data-tone="xmen"] { --lore-accent: var(--xmen); }
 .lore-shell[data-tone="street"] { --lore-accent: var(--street); }
@@ -742,7 +742,7 @@ footer > span { display: flex; align-items: center; gap: 6px; }
 
 .lore-scroll { position: relative; z-index: 2; height: 100%; height: 100dvh; overflow-y: auto; overscroll-behavior: contain; scrollbar-width: thin; scrollbar-color: var(--border) transparent; }
 
-.lore-topbar { position: sticky; top: 0; z-index: 5; height: 60px; padding: 0 clamp(16px, 4vw, 28px); display: flex; align-items: center; gap: 16px; background: rgb(7 11 8 / 95%); border-bottom: 1px solid var(--border); }
+.lore-topbar { position: sticky; top: 0; z-index: 5; height: var(--lore-bar-h); padding: env(safe-area-inset-top, 0px) clamp(16px, 4vw, 28px) 0; display: flex; align-items: center; gap: 16px; background: rgb(7 11 8 / 95%); border-bottom: 1px solid var(--border); }
 .lore-back { flex: 0 0 auto; display: flex; align-items: center; gap: 8px; height: 38px; padding: 0 13px; border: 1px solid var(--border); border-radius: 9px; background: var(--base); color: var(--secondary); cursor: pointer; font: 700 13px/1 var(--display); transition: .18s ease; }
 .lore-back:hover { color: var(--text); border-color: var(--lore-accent); }
 .lore-esc-hint { margin-left: 2px; padding: 2px 5px; border: 1px solid var(--border); border-radius: 4px; color: var(--muted); font: 700 10px/1 var(--display); }
@@ -761,10 +761,20 @@ footer > span { display: flex; align-items: center; gap: 6px; }
 .lore-beat p strong { color: var(--text); }
 .lore-end-spacer { height: 10vh; }
 
-.lore-stage { position: fixed; top: 60px; left: 0; width: 56%; height: calc(100% - 60px); height: calc(100dvh - 60px); z-index: 1; overflow: hidden; background: radial-gradient(circle at 30% 18%, color-mix(in srgb, var(--lore-accent) 10%, transparent), transparent 62%), var(--canvas); border-right: 1px solid var(--border); }
-.lore-stage-scene { position: absolute; inset: 0; display: grid; place-items: center; padding: 36px; opacity: 0; transition: opacity 420ms ease; }
+/* `--lore-p0`/`--lore-p1` are written by LoreExperience's scroll handler onto
+   this element every frame: `--lore-p0` is how far the scroll has moved from
+   the chapter's first beat to its second (0-1), `--lore-p1` from its second
+   to third (0-1, stays 0 for two-beat chapters). Every scene below reads
+   them straight in calc()/clamp() so motion tracks the scroll position
+   continuously instead of snapping in a single jump at a threshold. Rules
+   are scoped under `[data-active="true"]` so a pre/post-mounted neighbour
+   (kept mounted one chapter early/late for the opacity crossfade) stays at
+   its resting state instead of replaying whatever chapter is actually being
+   scrolled through. */
+.lore-stage { position: fixed; top: var(--lore-bar-h); left: 0; width: 56%; height: calc(100% - var(--lore-bar-h)); height: calc(100dvh - var(--lore-bar-h)); z-index: 1; overflow: hidden; background: radial-gradient(circle at 30% 18%, color-mix(in srgb, var(--lore-accent) 10%, transparent), transparent 62%), var(--canvas); border-right: 1px solid var(--border); }
+.lore-stage-scene { position: absolute; inset: 0; display: grid; place-items: center; padding: clamp(16px, 4vmin, 36px); opacity: 0; transition: opacity 420ms ease; }
 .lore-stage-scene[data-active="true"] { opacity: 1; }
-.lore-stage-numeral { position: absolute; right: 18px; bottom: 4px; z-index: 0; font: 400 240px/1 var(--display-cine); color: color-mix(in srgb, var(--lore-accent) 7%, transparent); pointer-events: none; user-select: none; }
+.lore-stage-numeral { position: absolute; right: calc(18px + env(safe-area-inset-right, 0px)); bottom: calc(4px + env(safe-area-inset-bottom, 0px)); z-index: 0; font: 400 clamp(110px, 34vmin, 240px)/1 var(--display-cine); color: color-mix(in srgb, var(--lore-accent) 7%, transparent); pointer-events: none; user-select: none; }
 
 .lore-scene { position: relative; z-index: 1; width: 100%; height: 100%; display: grid; place-items: center; }
 .lore-poster { width: 100%; position: relative; aspect-ratio: 2 / 3; border-radius: 10px; overflow: hidden; background: var(--base); box-shadow: 0 18px 40px rgb(0 0 0 / 40%), 0 0 0 1px rgb(var(--tint, 70 224 124) / 28%); }
@@ -775,94 +785,103 @@ footer > span { display: flex; align-items: center; gap: 6px; }
 
 /* -- 0. Intro -- */
 .lore-scene-intro { position: relative; }
-.lore-fan { position: relative; z-index: 1; width: 320px; height: 260px; }
-.fan-card { position: absolute; width: 140px; top: 10px; left: 50%; transition: transform .5s var(--ease-out-expo); }
+.lore-fan { position: relative; z-index: 1; width: clamp(160px, 70vmin, 320px); height: clamp(130px, 56vmin, 260px); }
+.fan-card { position: absolute; width: clamp(70px, 30vmin, 140px); top: 10px; left: 50%; transition: transform .5s var(--ease-out-expo); }
 .fan-left { transform: translate(-128%, 18px) rotate(-12deg); }
 .fan-center { transform: translate(-50%, -6px) scale(1.08); z-index: 1; }
 .fan-right { transform: translate(28%, 18px) rotate(12deg); }
-.lore-brandmark { position: absolute; z-index: 2; bottom: -36px; left: 50%; transform: translateX(-50%); width: 54px; aspect-ratio: 1; display: grid; place-items: center; border: 1px solid rgb(168 255 96 / 54%); background: linear-gradient(145deg, rgb(70 224 124 / 26%), rgb(168 255 96 / 15%)); clip-path: polygon(22% 0, 100% 0, 100% 78%, 78% 100%, 0 100%, 0 22%); }
+.lore-brandmark { position: absolute; z-index: 2; bottom: clamp(-36px, -3.5vmin, -8px); left: 50%; transform: translateX(-50%); width: 54px; aspect-ratio: 1; display: grid; place-items: center; border: 1px solid rgb(168 255 96 / 54%); background: linear-gradient(145deg, rgb(70 224 124 / 26%), rgb(168 255 96 / 15%)); clip-path: polygon(22% 0, 100% 0, 100% 78%, 78% 100%, 0 100%, 0 22%); }
 .lore-brandmark span { color: var(--global); font: 800 25px/1 var(--display); }
-.lore-scroll-cue { position: absolute; z-index: 1; bottom: 10px; left: 50%; transform: translateX(-50%); display: flex; align-items: center; gap: 6px; color: var(--muted); font: 700 11px/1 var(--display); text-transform: uppercase; letter-spacing: .08em; opacity: 0; transition: opacity .3s ease; }
-.lore-scroll-cue.show { opacity: 1; animation: lore-bob 1.6s ease-in-out infinite; }
+.lore-scroll-cue { position: absolute; z-index: 1; bottom: 10px; left: 50%; transform: translateX(-50%); display: flex; align-items: center; gap: 6px; color: var(--muted); font: 700 11px/1 var(--display); text-transform: uppercase; letter-spacing: .08em; opacity: 0; transition: opacity 120ms linear; }
+.lore-stage-scene[data-active="true"] .lore-scroll-cue { opacity: var(--lore-p0, 0); animation: lore-bob 1.6s ease-in-out infinite; }
 @keyframes lore-bob { 50% { transform: translate(-50%, 5px); } }
 
 /* -- 1. Order -- */
-.lore-strip { display: flex; gap: 14px; }
-.lore-strip-card { position: relative; width: 108px; flex: 0 0 auto; display: grid; justify-items: center; gap: 7px; opacity: 0; animation: lore-stagger-in .5s var(--ease-out-expo) both; animation-delay: calc(var(--i) * 90ms); }
-.lore-strip-tag { min-height: 18px; display: flex; align-items: center; gap: 4px; opacity: 0; transition: opacity .3s ease; }
-.lore-strip-tag.show { opacity: 1; }
+/* Six Phase One posters never fit edge-to-edge on a phone-width stage at any
+   reasonable size, so the strip scrolls horizontally instead of being
+   shrunk to the point of illegibility — it's decorative/aria-hidden, the
+   real numbered list is in the text column either way. */
+.lore-strip { display: flex; gap: 14px; max-width: 100%; overflow-x: auto; padding: 4px 2px 10px; scrollbar-width: none; }
+.lore-strip::-webkit-scrollbar { display: none; }
+.lore-strip-card { position: relative; width: clamp(78px, 24vmin, 108px); flex: 0 0 auto; display: grid; justify-items: center; gap: 7px; opacity: 0; animation: lore-stagger-in .5s var(--ease-out-expo) both; animation-delay: calc(var(--i) * 90ms); }
+.lore-strip-tag { min-height: 18px; display: flex; align-items: center; gap: 4px; opacity: 0; transition: opacity 120ms linear; }
+.lore-stage-scene[data-active="true"] .lore-strip-tag { opacity: clamp(0, calc((var(--lore-p0, 0) - var(--i, 0) * .12) * 3), 1); }
 .lore-strip-number { padding: 3px 6px; border-radius: 5px; background: rgb(11 14 20 / 80%); color: var(--text); font: 700 10px/1 var(--display); }
 .lore-strip-check { width: 18px; height: 18px; display: grid; place-items: center; border-radius: 50%; background: rgb(101 214 163 / 90%); color: #06110c; }
 .lore-strip-card small { color: var(--muted); font: 650 10px/1 var(--display); }
-@keyframes lore-stagger-in { from { opacity: 0; transform: translateY(14px); } }
+@keyframes lore-stagger-in { from { opacity: 0; transform: translateY(14px); } to { opacity: 1; transform: translateY(0); } }
 
 /* -- 2. Locks -- */
 .lore-scene-locks { display: grid; justify-items: center; gap: 24px; }
-.lore-sealed-card { position: relative; width: 180px; }
-.lore-sealed-poster { filter: grayscale(.6) brightness(.6); transition: filter .5s ease; }
-.lore-sealed-card.is-unlocking .lore-sealed-poster { filter: none; }
-.lore-sealed-badge { position: absolute; inset: 0; margin: auto; width: 46px; height: 46px; display: grid; place-items: center; border-radius: 50%; background: rgb(11 14 20 / 80%); color: var(--text); border: 1px solid rgb(255 255 255 / 20%); opacity: 1; transition: opacity .4s ease, transform .4s ease; }
-.lore-sealed-card.is-unlocking .lore-sealed-badge { opacity: 0; transform: scale(.6); }
+.lore-sealed-card { position: relative; width: clamp(100px, 38vmin, 180px); }
+.lore-sealed-poster { filter: grayscale(.6) brightness(.6); transition: filter 120ms linear; }
+.lore-stage-scene[data-active="true"] .lore-sealed-poster { filter: grayscale(calc(.6 - .6 * var(--lore-p0, 0))) brightness(calc(.6 + .4 * var(--lore-p0, 0))); }
+.lore-sealed-badge { position: absolute; inset: 0; margin: auto; width: 46px; height: 46px; display: grid; place-items: center; border-radius: 50%; background: rgb(11 14 20 / 80%); color: var(--text); border: 1px solid rgb(255 255 255 / 20%); opacity: 1; transition: opacity 120ms linear, transform 120ms linear; }
+.lore-stage-scene[data-active="true"] .lore-sealed-badge { opacity: calc(1 - var(--lore-p0, 0)); transform: scale(calc(1 - .4 * var(--lore-p0, 0))); }
 .lore-prereq-row { display: flex; gap: 10px; }
-.lore-prereq-chip { position: relative; width: 56px; opacity: .45; transition: opacity .35s ease; transition-delay: calc(var(--i) * 120ms); }
-.lore-prereq-chip.is-checked { opacity: 1; }
-.lore-prereq-check { position: absolute; right: -4px; bottom: -4px; width: 20px; height: 20px; display: grid; place-items: center; border-radius: 50%; background: var(--complete); color: #06150f; opacity: 0; transform: scale(.4); transition: opacity .3s ease, transform .3s ease; transition-delay: calc(var(--i) * 120ms); }
-.lore-prereq-chip.is-checked .lore-prereq-check { opacity: 1; transform: scale(1); }
+.lore-prereq-chip { position: relative; width: clamp(34px, 13vmin, 56px); opacity: .45; transition: opacity 120ms linear; }
+.lore-stage-scene[data-active="true"] .lore-prereq-chip { opacity: clamp(.45, calc(.45 + (var(--lore-p0, 0) - var(--i, 0) * .15) * 3), 1); }
+.lore-prereq-check { position: absolute; right: -4px; bottom: -4px; width: 20px; height: 20px; display: grid; place-items: center; border-radius: 50%; background: var(--complete); color: #06150f; opacity: 0; transform: scale(.4); transition: opacity 120ms linear, transform 120ms linear; }
+.lore-stage-scene[data-active="true"] .lore-prereq-check {
+  --reveal: clamp(0, calc((var(--lore-p0, 0) - var(--i, 0) * .15) * 3), 1);
+  opacity: var(--reveal);
+  transform: scale(calc(.4 + .6 * var(--reveal)));
+}
 
 /* -- 3. Optional -- */
 .lore-scene-optional { display: grid; justify-items: center; gap: 22px; }
 .lore-required-line { display: flex; gap: 14px; }
-.lore-required-line .lore-poster { width: 116px; }
+.lore-required-line .lore-poster { width: clamp(60px, 26vmin, 116px); }
 .lore-optional-row { display: flex; gap: 14px; }
-.lore-optional-chip { width: 86px; display: grid; gap: 6px; justify-items: center; opacity: 0; animation: lore-stagger-in .5s var(--ease-out-expo) both; animation-delay: calc(var(--i) * 100ms); }
+.lore-optional-chip { width: clamp(48px, 20vmin, 86px); display: grid; gap: 6px; justify-items: center; opacity: 0; animation: lore-stagger-in .5s var(--ease-out-expo) both; animation-delay: calc(var(--i) * 100ms); }
 .lore-optional-tag { padding: 2px 7px; border: 1px solid rgb(240 199 94 / 46%); border-radius: 99px; background: rgb(240 199 94 / 12%); color: var(--gold); font: 700 9px/1 var(--display); text-transform: uppercase; letter-spacing: .04em; }
-.lore-devpick { width: 116px; display: grid; gap: 7px; justify-items: center; opacity: .5; transform: translateY(6px) scale(.96); transition: opacity .4s ease, transform .4s ease; }
-.lore-devpick.show { opacity: 1; transform: none; }
+.lore-devpick { width: clamp(60px, 26vmin, 116px); display: grid; gap: 7px; justify-items: center; opacity: .5; transform: translateY(6px) scale(.96); transition: opacity 120ms linear, transform 120ms linear; }
+.lore-stage-scene[data-active="true"] .lore-devpick { opacity: calc(.5 + .5 * var(--lore-p0, 0)); transform: translateY(calc(6px - 6px * var(--lore-p0, 0))) scale(calc(.96 + .04 * var(--lore-p0, 0))); }
 .lore-devpick-badge { display: flex; align-items: center; gap: 4px; padding: 3px 8px; border-radius: 99px; border: 1px solid rgb(168 255 96 / 48%); background: rgb(168 255 96 / 12%); color: var(--global); font: 700 10px/1 var(--display); }
 
 /* -- 4. X-Men -- */
 .lore-scene-xmen { display: grid; justify-items: center; gap: 18px; }
 .lore-branch { display: flex; align-items: center; }
-.lore-branch .lore-poster { width: 118px; }
-.lore-branch-line { width: 56px; height: 50px; flex: 0 0 auto; overflow: visible; }
-.lore-branch-line path { fill: none; stroke: var(--lore-accent); stroke-width: 2.5; stroke-dasharray: 220; stroke-dashoffset: 220; transition: stroke-dashoffset .7s var(--ease-out-expo); }
-.lore-branch-line.draw path { stroke-dashoffset: 0; }
-.lore-branch-join { opacity: 0; transform: translateY(10px); transition: opacity .4s ease, transform .4s ease; }
-.lore-branch-join.show { opacity: 1; transform: none; }
-.lore-branch-final { width: 130px; }
+.lore-branch .lore-poster { width: clamp(56px, 24vmin, 118px); }
+.lore-branch-line { width: clamp(30px, 11vmin, 56px); height: clamp(26px, 10vmin, 50px); flex: 0 0 auto; overflow: visible; }
+.lore-branch-line path { fill: none; stroke: var(--lore-accent); stroke-width: 2.5; stroke-dasharray: 220; stroke-dashoffset: 220; transition: stroke-dashoffset 120ms linear; }
+.lore-stage-scene[data-active="true"] .lore-branch-line path { stroke-dashoffset: calc(220 - 220 * var(--lore-p0, 0)); }
+.lore-branch-join { opacity: 0; transform: translateY(10px); transition: opacity 120ms linear, transform 120ms linear; }
+.lore-stage-scene[data-active="true"] .lore-branch-join { opacity: var(--lore-p1, 0); transform: translateY(calc(10px - 10px * var(--lore-p1, 0))); }
+.lore-branch-final { width: clamp(64px, 28vmin, 130px); }
 
 /* -- 5. Bridge -- */
 .lore-scene-bridge { display: flex; align-items: center; justify-content: center; gap: 0; width: 100%; }
-.lore-bridge-poster { width: 150px; flex: 0 0 auto; z-index: 1; }
-.lore-bridge-line { width: 100px; height: 20px; flex: 0 0 auto; }
-.lore-bridge-line path { fill: none; stroke: var(--lore-accent); stroke-width: 2; stroke-dasharray: 300; stroke-dashoffset: 300; transition: stroke-dashoffset .8s var(--ease-out-expo); }
-.lore-bridge-line.draw path { stroke-dashoffset: 0; }
-.lore-bridge-portal { position: absolute; width: 90px; height: 90px; border-radius: 50%; border: 2px solid transparent; opacity: 0; transition: opacity .4s ease; }
-.lore-bridge-portal.active { opacity: 1; border-color: color-mix(in srgb, var(--lore-accent) 60%, transparent); box-shadow: 0 0 0 10px color-mix(in srgb, var(--lore-accent) 10%, transparent), 0 0 40px color-mix(in srgb, var(--lore-accent) 25%, transparent); animation: lore-portal-pulse 2.2s ease-in-out infinite; }
+.lore-bridge-poster { width: clamp(68px, 30vmin, 150px); flex: 0 0 auto; z-index: 1; }
+.lore-bridge-line { width: clamp(44px, 14vmin, 100px); height: clamp(10px, 3vmin, 20px); flex: 0 0 auto; }
+.lore-bridge-line path { fill: none; stroke: var(--lore-accent); stroke-width: 2; stroke-dasharray: 300; stroke-dashoffset: 300; transition: stroke-dashoffset 120ms linear; }
+.lore-stage-scene[data-active="true"] .lore-bridge-line path { stroke-dashoffset: calc(300 - 300 * var(--lore-p0, 0)); }
+.lore-bridge-portal { position: absolute; width: 90px; height: 90px; border-radius: 50%; border: 2px solid transparent; opacity: 0; transition: opacity 120ms linear; }
+.lore-stage-scene[data-active="true"] .lore-bridge-portal { opacity: clamp(0, calc((var(--lore-p0, 0) - .3) * 1.43), 1); border-color: color-mix(in srgb, var(--lore-accent) 60%, transparent); box-shadow: 0 0 0 10px color-mix(in srgb, var(--lore-accent) 10%, transparent), 0 0 40px color-mix(in srgb, var(--lore-accent) 25%, transparent); animation: lore-portal-pulse 2.2s ease-in-out infinite; }
 @keyframes lore-portal-pulse { 50% { transform: scale(1.08); } }
 
 /* -- 6. Street -- */
 .lore-scene-street { display: grid; justify-items: center; gap: 26px; }
-.lore-quad { position: relative; width: 300px; height: 220px; }
-.lore-quad .lore-poster { position: absolute; width: 96px; transition: transform .6s var(--ease-out-expo); }
+.lore-quad { position: relative; width: clamp(170px, 68vmin, 300px); height: clamp(124px, 50vmin, 220px); }
+.lore-quad .lore-poster { position: absolute; width: clamp(48px, 20vmin, 96px); transition: transform 120ms linear, opacity 120ms linear; }
 .quad-tl { top: 0; left: 10px; transform: translate(0, 0); }
 .quad-tr { top: 0; right: 10px; transform: translate(0, 0); }
 .quad-bl { bottom: 0; left: 10px; transform: translate(0, 0); }
 .quad-br { bottom: 0; right: 10px; transform: translate(0, 0); }
-.quad-center { top: 50%; left: 50%; width: 104px; transform: translate(-50%, -50%) scale(0); opacity: 0; transition: transform .5s var(--ease-out-expo), opacity .3s ease; z-index: 2; }
-.lore-quad.converged .quad-tl { transform: translate(78px, 60px) scale(.8); opacity: .5; }
-.lore-quad.converged .quad-tr { transform: translate(-78px, 60px) scale(.8); opacity: .5; }
-.lore-quad.converged .quad-bl { transform: translate(78px, -60px) scale(.8); opacity: .5; }
-.lore-quad.converged .quad-br { transform: translate(-78px, -60px) scale(.8); opacity: .5; }
-.lore-quad.converged .quad-center { transform: translate(-50%, -50%) scale(1); opacity: 1; }
-.lore-split-row { display: flex; gap: 14px; opacity: 0; transform: translateY(10px); transition: opacity .4s ease, transform .4s ease; }
-.lore-split-row.show { opacity: 1; transform: none; }
-.lore-split-row .lore-poster { width: 90px; }
+.quad-center { top: 50%; left: 50%; width: clamp(52px, 22vmin, 104px); transform: translate(-50%, -50%) scale(0); opacity: 0; z-index: 2; }
+.lore-stage-scene[data-active="true"] .quad-tl { transform: translate(calc(78px * var(--lore-p0, 0)), calc(60px * var(--lore-p0, 0))) scale(calc(1 - .2 * var(--lore-p0, 0))); opacity: calc(1 - .5 * var(--lore-p0, 0)); }
+.lore-stage-scene[data-active="true"] .quad-tr { transform: translate(calc(-78px * var(--lore-p0, 0)), calc(60px * var(--lore-p0, 0))) scale(calc(1 - .2 * var(--lore-p0, 0))); opacity: calc(1 - .5 * var(--lore-p0, 0)); }
+.lore-stage-scene[data-active="true"] .quad-bl { transform: translate(calc(78px * var(--lore-p0, 0)), calc(-60px * var(--lore-p0, 0))) scale(calc(1 - .2 * var(--lore-p0, 0))); opacity: calc(1 - .5 * var(--lore-p0, 0)); }
+.lore-stage-scene[data-active="true"] .quad-br { transform: translate(calc(-78px * var(--lore-p0, 0)), calc(-60px * var(--lore-p0, 0))) scale(calc(1 - .2 * var(--lore-p0, 0))); opacity: calc(1 - .5 * var(--lore-p0, 0)); }
+.lore-stage-scene[data-active="true"] .quad-center { transform: translate(-50%, -50%) scale(var(--lore-p0, 0)); opacity: var(--lore-p0, 0); }
+.lore-split-row { display: flex; gap: 14px; opacity: 0; transform: translateY(10px); transition: opacity 120ms linear, transform 120ms linear; }
+.lore-stage-scene[data-active="true"] .lore-split-row { opacity: var(--lore-p1, 0); transform: translateY(calc(10px - 10px * var(--lore-p1, 0))); }
+.lore-split-row .lore-poster { width: clamp(48px, 19vmin, 90px); }
 
 /* -- 7. Counts -- */
 .lore-scene-counts { display: grid; justify-items: center; gap: 22px; text-align: center; }
 .lore-equation { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; justify-content: center; }
-.lore-eq-tile { padding: 14px 16px; display: grid; gap: 4px; border-radius: 12px; font: 700 13px/1 var(--display); transition: opacity .4s ease, transform .4s ease; }
+.lore-eq-tile { padding: 14px 16px; display: grid; gap: 4px; border-radius: 12px; font: 700 13px/1 var(--display); transition: opacity 120ms linear, transform 120ms linear; }
 .lore-eq-tile.required { border: 1px solid color-mix(in srgb, var(--lore-accent) 42%, transparent); background: color-mix(in srgb, var(--lore-accent) 10%, transparent); color: var(--text); }
 .lore-eq-tile.bonus { border: 1px solid var(--border); background: var(--base); color: var(--muted); }
 .lore-eq-tile small { color: var(--muted); font: 650 9px/1 var(--display); text-transform: uppercase; letter-spacing: .05em; }
@@ -872,25 +891,32 @@ footer > span { display: flex; align-items: center; gap: 6px; }
 .lore-eq-result strong, .lore-eq-result small { position: relative; z-index: 1; }
 .lore-eq-result strong { font: 750 20px/1 var(--display); }
 .lore-eq-result small { margin-top: 3px; display: block; color: var(--muted); font: 650 9px/1 var(--display); text-transform: uppercase; }
-.lore-eq-bonus { display: flex; gap: 10px; transition: opacity .4s ease, transform .4s ease; }
-.lore-equation.bonus-fade .lore-eq-bonus { opacity: .4; transform: translateY(4px) scale(.95); }
-.lore-eq-caption { margin: 0; color: var(--secondary); font-size: 14px; }
+.lore-eq-bonus { display: flex; gap: 10px; transition: opacity 120ms linear, transform 120ms linear; }
+.lore-stage-scene[data-active="true"] .lore-eq-bonus { opacity: calc(1 - .6 * var(--lore-p0, 0)); transform: translateY(calc(4px * var(--lore-p0, 0))) scale(calc(1 - .05 * var(--lore-p0, 0))); }
+.lore-eq-caption { margin: 0; color: var(--secondary); font-size: 14px; opacity: 0; transition: opacity 120ms linear; }
+.lore-stage-scene[data-active="true"] .lore-eq-caption { opacity: var(--lore-p1, 0); }
 .lore-eq-caption strong { color: var(--text); font: 750 20px/1 var(--display); }
 
 /* -- 8. Finale -- */
 .lore-scene-finale { position: relative; display: grid; place-items: center; }
-.lore-converge { position: relative; width: 240px; height: 180px; }
-.lore-converge .line { position: absolute; height: 2px; width: 50%; transform-origin: right center; opacity: 0; transition: opacity .5s ease, transform .6s var(--ease-out-expo); }
-.lore-converge.converge .line { opacity: .85; }
+.lore-converge { position: relative; width: clamp(140px, 56vmin, 240px); height: clamp(100px, 42vmin, 180px); }
+.lore-converge .line { position: absolute; height: 2px; width: 50%; transform-origin: right center; opacity: 0; transition: opacity 120ms linear, transform 120ms linear; }
+.lore-stage-scene[data-active="true"] .lore-converge .line { opacity: calc(.85 * var(--lore-p0, 0)); }
 .line-mcu { top: 20%; left: 0; background: var(--mcu); transform: rotate(8deg) scaleX(.4); }
 .line-xmen { top: 50%; left: 0; background: var(--xmen); transform: scaleX(.4); }
 .line-street { top: 80%; left: 0; background: var(--street); transform: rotate(-8deg) scaleX(.4); }
-.lore-converge.converge .line-mcu { transform: rotate(8deg) scaleX(1); }
-.lore-converge.converge .line-xmen { transform: scaleX(1); }
-.lore-converge.converge .line-street { transform: rotate(-8deg) scaleX(1); }
-.line-point { position: absolute; top: 50%; right: 0; width: 14px; height: 14px; border-radius: 50%; background: var(--global); box-shadow: 0 0 22px var(--global); transform: translate(50%, -50%) scale(0); transition: transform .4s ease .3s; }
-.lore-converge.converge .line-point { transform: translate(50%, -50%) scale(1); }
-.lore-finale-panel { position: absolute; bottom: 36px; left: 50%; transform: translateX(-50%); width: min(340px, 86%); display: grid; gap: 12px; animation: lore-stagger-in .4s var(--ease-out-expo) both; }
+.lore-stage-scene[data-active="true"] .line-mcu { transform: rotate(8deg) scaleX(calc(.4 + .6 * var(--lore-p0, 0))); }
+.lore-stage-scene[data-active="true"] .line-xmen { transform: scaleX(calc(.4 + .6 * var(--lore-p0, 0))); }
+.lore-stage-scene[data-active="true"] .line-street { transform: rotate(-8deg) scaleX(calc(.4 + .6 * var(--lore-p0, 0))); }
+.line-point { position: absolute; top: 50%; right: 0; width: 14px; height: 14px; border-radius: 50%; background: var(--global); box-shadow: 0 0 22px var(--global); transform: translate(50%, -50%) scale(0); transition: transform 120ms linear; }
+.lore-stage-scene[data-active="true"] .line-point { transform: translate(50%, -50%) scale(var(--lore-p0, 0)); }
+.lore-finale-panel { position: absolute; bottom: calc(36px + env(safe-area-inset-bottom, 0px)); left: 50%; width: min(340px, 86%); display: grid; gap: 12px; opacity: 0; transform: translate(-50%, 10px); transition: opacity 120ms linear, transform 120ms linear; pointer-events: none; }
+.lore-stage-scene[data-active="true"] .lore-finale-panel {
+  --reveal: clamp(0, calc((var(--lore-p0, 0) - .5) * 2), 1);
+  opacity: var(--reveal);
+  transform: translate(-50%, calc(10px - 10px * var(--reveal)));
+  pointer-events: auto;
+}
 .lore-finale-days { padding: 14px; text-align: center; border: 1px solid var(--border); border-radius: 12px; background: var(--base); }
 .lore-finale-days strong { display: block; font: 750 32px/1 var(--display); color: var(--global); }
 .lore-finale-days small { color: var(--muted); font: 650 10px/1 var(--display); text-transform: uppercase; letter-spacing: .05em; }
@@ -902,11 +928,11 @@ footer > span { display: flex; align-items: center; gap: 6px; }
 .lore-finale-next strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 650 13px/1.2 var(--display); }
 
 /* -- Rail + swipe hint -- */
-.lore-rail { position: fixed; top: 50%; right: 18px; z-index: 6; transform: translateY(-50%); display: flex; flex-direction: column; gap: 9px; }
+.lore-rail { position: fixed; top: 50%; right: calc(18px + env(safe-area-inset-right, 0px)); z-index: 6; transform: translateY(-50%); display: flex; flex-direction: column; gap: 9px; }
 .lore-rail-dot { width: 8px; height: 8px; padding: 0; border: 1px solid var(--border); border-radius: 50%; background: var(--base); cursor: pointer; transition: .2s ease; }
 .lore-rail-dot:hover { border-color: var(--lore-accent); }
 .lore-rail-dot.active { width: 9px; height: 22px; border-radius: 99px; background: var(--lore-accent); border-color: var(--lore-accent); }
-.lore-swipe-hint { position: fixed; left: 50%; bottom: 28px; z-index: 7; transform: translateX(-50%); padding: 9px 16px; border-radius: 99px; background: rgb(11 14 20 / 88%); border: 1px solid var(--border); color: var(--secondary); font: 700 12px/1 var(--display); animation: lore-hint-in .3s ease both; pointer-events: none; }
+.lore-swipe-hint { position: fixed; left: 50%; bottom: calc(28px + env(safe-area-inset-bottom, 0px)); z-index: 7; transform: translateX(-50%); padding: 9px 16px; border-radius: 99px; background: rgb(11 14 20 / 88%); border: 1px solid var(--border); color: var(--secondary); font: 700 12px/1 var(--display); animation: lore-hint-in .3s ease both; pointer-events: none; }
 @keyframes lore-hint-in { from { opacity: 0; transform: translate(-50%, 8px); } }
 
 @media (max-width: 899px) {
@@ -917,16 +943,46 @@ footer > span { display: flex; align-items: center; gap: 6px; }
   .lore-beat { min-height: 50vh; }
   .lore-beat p { max-width: 36ch; padding: 16px; border-radius: 14px; background: rgb(7 11 8 / 82%); border: 1px solid var(--border); }
   .lore-rail { display: none; }
-  .lore-stage-numeral { font-size: 160px; }
 }
 @media (min-width: 900px) {
   .lore-text { margin-left: 56%; }
 }
 @media (max-width: 580px) {
-  .lore-topbar { padding: 0 14px; height: 54px; }
+  .lore-shell { --lore-bar-h: calc(54px + env(safe-area-inset-top, 0px)); }
+  .lore-topbar { padding: env(safe-area-inset-top, 0px) 14px 0; }
   .lore-back span, .lore-chapter-label span { font-size: 10px; }
   .lore-chapter-title { font-size: clamp(24px, 7vw, 30px); }
-  .lore-stage-numeral { font-size: 120px; }
+}
+
+/* Short viewports (landscape phones, small devices) clip the stage's fixed
+   vertical padding and chapter spacing regardless of width, since the width
+   breakpoints above say nothing about available height — this is the actual
+   "some pages are cut off" case, reported on specific phone sizes. */
+@media (max-height: 640px) {
+  .lore-shell { --lore-bar-h: calc(46px + env(safe-area-inset-top, 0px)); }
+  .lore-topbar { height: var(--lore-bar-h); }
+  .lore-stage-scene { padding: clamp(8px, 2.5vmin, 20px); }
+  .lore-chapter-block { padding-top: 36px; }
+  .lore-beat { min-height: 0; padding: 10px 0; }
+  .lore-text { padding-bottom: 12vh; }
+  .lore-finale-panel { bottom: calc(14px + env(safe-area-inset-bottom, 0px)); }
+  /* Multi-row scenes (two or three stacked groups of posters) are the ones
+     that run out of vertical room first on a short/landscape viewport —
+     tighten their gaps so the whole stack fits under the stage's reduced
+     height instead of bleeding past it. */
+  .lore-scene-locks, .lore-scene-optional, .lore-scene-xmen, .lore-scene-street { gap: 10px; }
+  .lore-required-line, .lore-optional-row, .lore-prereq-row { gap: 8px; }
+}
+
+/* Genuinely extreme viewports (a phone rotated to landscape with the browser
+   chrome visible) can't fit three stacked poster rows at any size that's
+   still legible — shrink the Optional scene's three rows further so the
+   decorative stage keeps up with how little height is left. */
+@media (max-height: 400px) {
+  .lore-scene-optional { gap: 2px; }
+  .lore-required-line, .lore-optional-row { gap: 4px; }
+  .lore-required-line .lore-poster, .lore-optional-chip, .lore-devpick { width: clamp(28px, 10vmin, 48px); }
+  .lore-optional-tag, .lore-devpick-badge { padding: 1px 5px; font-size: 8px; }
 }
 
 @media (hover: none) {

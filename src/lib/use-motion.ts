@@ -216,8 +216,13 @@ export function useHistoryClose(onBackButton: () => void) {
   }, [onBackButton]);
 
   useEffect(() => {
-    history.pushState({ overlay: true }, "", "?lore");
-    pushedRef.current = true;
+    // Guard the push itself (not just this effect running once) so that React
+    // Strict Mode's dev-time mount -> cleanup -> mount double-invocation never
+    // pushes twice. `pushedRef` survives that cycle; only push the first time.
+    if (!pushedRef.current) {
+      history.pushState({ overlay: true }, "", "?lore");
+      pushedRef.current = true;
+    }
 
     function onPopState() {
       if (!pushedRef.current) return;
@@ -226,14 +231,14 @@ export function useHistoryClose(onBackButton: () => void) {
     }
 
     window.addEventListener("popstate", onPopState);
+    // No history.back() safety net here: under Strict Mode this cleanup also
+    // runs for the throwaway first invocation, and calling history.back() there
+    // fires a real popstate that the second (real) listener picks up, closing
+    // the overlay immediately after it opens. An abrupt unmount (e.g. logout)
+    // can leave an inert "?lore" in history instead — harmless, since nothing
+    // reads that param on mount.
     return () => {
       window.removeEventListener("popstate", onPopState);
-      // Unmounted some other way (e.g. logout) without consuming our entry —
-      // pop it now so a later Back from the dashboard doesn't land on a stale URL.
-      if (pushedRef.current) {
-        pushedRef.current = false;
-        history.back();
-      }
     };
   }, []);
 

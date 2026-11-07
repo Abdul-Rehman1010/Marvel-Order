@@ -8,7 +8,7 @@ import { useDialogBehavior, useHistoryClose, usePrefersReducedMotion, useSwipeTo
 import { LORE_SCENES, type LoreChapterId, type LoreSceneProps } from "@/components/nexus/lore-scenes";
 
 type Tone = "mcu" | "optional" | "xmen" | "street" | "doomsday";
-type SceneData = Omit<LoreSceneProps, "beatIndex">;
+type SceneData = LoreSceneProps;
 type Beat = string | ((data: SceneData) => ReactNode);
 
 type Chapter = {
@@ -135,13 +135,15 @@ export function LoreExperience({
   onOpenItem: (item: ContentItem) => void;
   onExit: () => void;
 }) {
-  const [active, setActive] = useState({ chapter: 0, beat: 0 });
+  const [activeChapterIndex, setActiveChapterIndex] = useState(0);
   const [closing, setClosing] = useState(false);
   const [showSwipeHint, setShowSwipeHint] = useState(false);
   const reducedMotion = usePrefersReducedMotion();
   const scrollRef = useRef<HTMLDivElement>(null);
+  const stageRef = useRef<HTMLDivElement>(null);
   const progressRef = useRef<HTMLSpanElement>(null);
   const beatElsRef = useRef(new Map<string, HTMLElement>());
+  const beatMetricsRef = useRef<{ chapter: number; beat: number; center: number }[]>([]);
 
   const consumeHistoryEntry = useHistoryClose(() => setClosing(true));
   const requestClose = useCallback(() => {
@@ -189,41 +191,101 @@ export function LoreExperience({
     };
   }, []);
 
-  // Track which beat is centered in the scroller; only ~20 beats exist total,
-  // so one observer with a thin center band is cheap for the whole guide.
+  // Measure each beat's vertical center, relative to the scroll content
+  // (via offsetTop, which is stable regardless of current scroll position),
+  // once on mount and again on resize/orientation change. `.lore-scroll` is
+  // the positioned ancestor for every `.lore-beat`, so offsetTop is already
+  // content-relative with no further arithmetic needed.
   useEffect(() => {
-    const observer = new IntersectionObserver(
-      (entries) => {
-        for (const entry of entries) {
-          if (!entry.isIntersecting) continue;
-          const key = (entry.target as HTMLElement).dataset.beatKey;
-          if (!key) continue;
-          const [chapter, beat] = key.split("-").map(Number);
-          setActive({ chapter, beat });
-        }
-      },
-      { rootMargin: "-45% 0px -45% 0px", threshold: 0 },
-    );
-    for (const el of beatElsRef.current.values()) observer.observe(el);
-    return () => observer.disconnect();
+    function measure() {
+      const metrics: { chapter: number; beat: number; center: number }[] = [];
+      for (const [key, el] of beatElsRef.current.entries()) {
+        const [chapter, beat] = key.split("-").map(Number);
+        metrics.push({ chapter, beat, center: el.offsetTop + el.offsetHeight / 2 });
+      }
+      metrics.sort((a, b) => a.center - b.center);
+      beatMetricsRef.current = metrics;
+    }
+    measure();
+    window.addEventListener("resize", measure);
+    // Re-measure once more shortly after mount: web fonts or image aspect
+    // ratios settling in can shift beat heights after the first layout pass.
+    const settleTimer = window.setTimeout(measure, 300);
+    return () => {
+      window.removeEventListener("resize", measure);
+      window.clearTimeout(settleTimer);
+    };
   }, []);
 
+  // Drive the whole guide from one continuous value instead of a discrete
+  // "which beat is active" flag: on every scroll frame, find exactly where
+  // the viewport's center falls between the two beats bracketing it, as a
+  // fractional position (e.g. 1.35 = 35% of the way from beat 1 to beat 2).
+  // The chapter index (coarse; which scene is mounted) still goes through
+  // React state, since it only changes a few times per read. The fractional
+  // position *within* that chapter is written straight to a CSS custom
+  // property on the stage via a ref — every scene's CSS reads it directly in
+  // calc()/clamp() expressions, so visuals move continuously with the scroll
+  // instead of snapping in a single jump when a threshold is crossed, and
+  // skipping React entirely here keeps a 60fps scroll cheap.
   useEffect(() => {
     const node = scrollRef.current;
     if (!node) return undefined;
     let frame = 0;
+
+    function update() {
+      frame = 0;
+      const metrics = beatMetricsRef.current;
+      if (!metrics.length) return;
+
+      const mid = node!.scrollTop + node!.clientHeight / 2;
+      let globalPos = 0;
+      if (mid <= metrics[0].center) {
+        globalPos = 0;
+      } else if (mid >= metrics[metrics.length - 1].center) {
+        globalPos = metrics.length - 1;
+      } else {
+        for (let i = 0; i < metrics.length - 1; i++) {
+          const a = metrics[i];
+          const b = metrics[i + 1];
+          if (mid >= a.center && mid <= b.center) {
+            globalPos = i + (mid - a.center) / Math.max(1, b.center - a.center);
+            break;
+          }
+        }
+      }
+
+      const nearestIndex = Math.min(metrics.length - 1, Math.max(0, Math.round(globalPos)));
+      const chapter = metrics[nearestIndex].chapter;
+      const chapterStartIndex = metrics.findIndex((m) => m.chapter === chapter);
+      const chapterBeatCount = metrics.filter((m) => m.chapter === chapter).length;
+      const localProgress = Math.max(0, Math.min(chapterBeatCount - 1, globalPos - chapterStartIndex));
+
+      setActiveChapterIndex((current) => (current === chapter ? current : chapter));
+
+      const stageNode = stageRef.current;
+      if (stageNode) {
+        stageNode.style.setProperty("--lore-p0", String(Math.max(0, Math.min(1, localProgress))));
+        stageNode.style.setProperty("--lore-p1", String(Math.max(0, Math.min(1, localProgress - 1))));
+      }
+
+      const max = node!.scrollHeight - node!.clientHeight;
+      const ratio = max > 0 ? node!.scrollTop / max : 0;
+      if (progressRef.current) progressRef.current.style.transform = `scaleX(${ratio})`;
+    }
+
     function onScroll() {
       if (frame) return;
-      frame = window.requestAnimationFrame(() => {
-        frame = 0;
-        const max = node!.scrollHeight - node!.clientHeight;
-        const ratio = max > 0 ? node!.scrollTop / max : 0;
-        if (progressRef.current) progressRef.current.style.transform = `scaleX(${ratio})`;
-      });
+      frame = window.requestAnimationFrame(update);
     }
+
     node.addEventListener("scroll", onScroll, { passive: true });
+    // Run once after the initial measurement settles, so the guide opens
+    // already reflecting beat 0 instead of waiting for the first scroll.
+    const initTimer = window.setTimeout(update, 50);
     return () => {
       node.removeEventListener("scroll", onScroll);
+      window.clearTimeout(initTimer);
       if (frame) window.cancelAnimationFrame(frame);
     };
   }, []);
@@ -252,7 +314,7 @@ export function LoreExperience({
     [watched, doomsdayPercent, remainingSeconds, daysLeft, nextUp, handleOpenItem],
   );
 
-  const activeChapter = CHAPTERS[active.chapter];
+  const activeChapter = CHAPTERS[activeChapterIndex];
 
   return (
     <div
@@ -270,7 +332,7 @@ export function LoreExperience({
             <ArrowLeft size={17} /> Back <kbd className="lore-esc-hint">Esc</kbd>
           </button>
           <div className="lore-chapter-label">
-            <span>{String(active.chapter + 1).padStart(2, "0")} / {String(CHAPTERS.length).padStart(2, "0")}</span>
+            <span>{String(activeChapterIndex + 1).padStart(2, "0")} / {String(CHAPTERS.length).padStart(2, "0")}</span>
             <strong>{activeChapter.title}</strong>
           </div>
           <div className="lore-progress-track" aria-hidden="true"><span ref={progressRef} className="lore-progress-fill" /></div>
@@ -296,18 +358,18 @@ export function LoreExperience({
         </div>
       </div>
 
-      <div className="lore-stage" aria-hidden="true">
+      <div ref={stageRef} className="lore-stage" aria-hidden="true">
         {CHAPTERS.map((chapter, index) => {
-          if (Math.abs(index - active.chapter) > 1) return null;
+          if (Math.abs(index - activeChapterIndex) > 1) return null;
           const Scene = LORE_SCENES[chapter.id];
-          const isActive = index === active.chapter;
+          const isActive = index === activeChapterIndex;
           return (
             <div key={chapter.id} className="lore-stage-scene" data-active={isActive}>
-              <Scene {...sceneData} beatIndex={isActive ? active.beat : 0} />
+              <Scene {...sceneData} />
             </div>
           );
         })}
-        <div className="lore-stage-numeral">{String(active.chapter + 1).padStart(2, "0")}</div>
+        <div className="lore-stage-numeral">{String(activeChapterIndex + 1).padStart(2, "0")}</div>
       </div>
 
       <nav className="lore-rail" aria-label="Chapters">
@@ -315,10 +377,10 @@ export function LoreExperience({
           <button
             key={chapter.id}
             type="button"
-            className={`lore-rail-dot ${index === active.chapter ? "active" : ""}`}
+            className={`lore-rail-dot ${index === activeChapterIndex ? "active" : ""}`}
             onClick={() => jumpToChapter(index)}
             aria-label={chapter.title}
-            aria-current={index === active.chapter ? "true" : undefined}
+            aria-current={index === activeChapterIndex ? "true" : undefined}
           />
         ))}
       </nav>
