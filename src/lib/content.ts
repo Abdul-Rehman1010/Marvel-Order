@@ -203,9 +203,9 @@ const mcu: ContentItem[] = [
   }),
   movie("the-marvels", "The Marvels", "2023-11-10", 105, "Phase Five", "The Marvels"),
   series("what-if-2", "What If…? — Season 2", "2023-12-22", [33, 31, 29, 31, 32, 31, 30, 31, 34], false, "Phase Five", { wikiTitle: "What If...? season 2" }),
-  series("agatha", "Agatha All Along", "2024-09-18", [40, 44, 39, 44, 49, 50, 37, 49, 43], false, "Phase Five", {
+  series("agatha", "Agatha All Along", "2024-09-18", [40, 44, 39, 44, 49, 50, 37, 49, 43], true, "Phase Five", {
     wikiTitle: "Agatha All Along (miniseries)",
-    lore: "Optional continuation of WandaVision's magical consequences that expands the rules surrounding witches and power without gating the road to Doomsday.",
+    lore: "Required for Doomsday: continues WandaVision's magical consequences and expands the rules surrounding witches and power.",
   }),
   series("what-if-3", "What If…? — Season 3", "2024-12-22", [32, 31, 33, 31, 34, 32, 31, 36], false, "Phase Five", { wikiTitle: "What If...? season 3" }),
   series("friendly-spider-man-1", "Your Friendly Neighborhood Spider-Man — Season 1", "2025-01-29", [32, 31, 30, 31, 32, 30, 31, 32, 31, 34], false, "Phase Five", { wikiTitle: "Your Friendly Neighborhood Spider-Man" }),
@@ -217,10 +217,10 @@ const mcu: ContentItem[] = [
   series("marvel-zombies", "Marvel Zombies", "2025-09-24", [33, 35, 36, 38], false, "Phase Six", { wikiTitle: "Marvel Zombies (TV series)" }),
   series("wonder-man", "Wonder Man", "2026-01-27", [35, 36, 33, 38, 40, 37, 41, 44], false, "Phase Six", { wikiTitle: "Wonder Man (miniseries)" }),
   movie("brand-new-day", "Spider-Man: Brand New Day", "2026-07-31", 136, "Phase Six", "Spider-Man: Brand New Day"),
-  series("visionquest", "VisionQuest", "2026-10-14", [53, 45, 52, 48, 46, 54, 62, 68], false, "Phase Six", {
+  series("visionquest", "VisionQuest", "2026-10-14", [53, 45, 52, 48, 46, 54, 62, 68], true, "Phase Six", {
     wikiTitle: "VisionQuest (miniseries)",
     summary: "Vision's story continues in the final chapter of the trilogy begun by WandaVision.",
-    lore: "Optional final chapter of the WandaVision trilogy, available for completionists without gating the road to Doomsday.",
+    lore: "Required for Doomsday: the final chapter of the WandaVision trilogy.",
     episodeTitles: ["No Strings", "Theseus", "Reboot", "Malware", "Firewall", "Deadlock", "Immolation", "Forever"],
   }),
   series("friendly-spider-man-2", "Your Friendly Neighborhood Spider-Man — Season 2", "2026-11-01", [0, 0, 0, 0, 0, 0, 0, 0, 0, 0], false, "Phase Six", {
@@ -433,10 +433,10 @@ const xmen: ContentItem[] = [
   xmenMovie("deadpool", "Deadpool", "2016-02-12", 108, true, "Deadpool (film)", "Requires X-Men (2000) to establish the legacy mutant universe before Wade Wilson's story begins."),
   xmenMovie("apocalypse", "X-Men: Apocalypse", "2016-05-27", 144, false, "X-Men: Apocalypse", "Optional branch: shown in release position but not required for the Doomsday-ready path."),
   xmenMovie("logan", "Logan", "2017-03-03", 137, true, "Logan (film)"),
-  xmenMovie("deadpool-2", "Deadpool 2", "2018-05-18", 119, false, "Deadpool 2", "Optional for Doomsday, but still requires Deadpool so Wade Wilson's story and supporting characters carry forward in sequence."),
+  xmenMovie("deadpool-2", "Deadpool 2", "2018-05-18", 119, true, "Deadpool 2", "Required for Doomsday, and requires only Deadpool so Wade Wilson's story and supporting characters carry forward in sequence."),
   xmenMovie("dark-phoenix", "Dark Phoenix", "2019-06-07", 114, false, "Dark Phoenix (film)", "Optional branch: visible for completionists but never blocks later required mutant entries."),
   xmenMovie("new-mutants", "The New Mutants", "2020-08-28", 94, false, "The New Mutants (film)", "Optional branch: part of the Fox catalogue, but not required for the core Doomsday context."),
-  xmenMovie("deadpool-wolverine", "Deadpool & Wolverine", "2024-07-26", 128, false, "Deadpool & Wolverine", "Optional for Doomsday, but its spoiler-safe gate remains: complete every earlier required mutant film plus Deadpool 2."),
+  xmenMovie("deadpool-wolverine", "Deadpool & Wolverine", "2024-07-26", 128, true, "Deadpool & Wolverine", "Required for Doomsday. Its spoiler-safe gate: complete every earlier required mutant film, including Deadpool 2."),
 ];
 
 const MOVIE_SUMMARIES: Record<string, string> = {
@@ -563,7 +563,7 @@ export function priorRequiredItems(item: ContentItem) {
   const index = universeItems.findIndex((candidate) => candidate.id === item.id);
   return universeItems
     .slice(0, index)
-    .filter((candidate) => candidate.required || (item.id === "deadpool-wolverine" && candidate.id === "deadpool-2"));
+    .filter((candidate) => candidate.required);
 }
 
 function directPrerequisiteItems(item: ContentItem) {

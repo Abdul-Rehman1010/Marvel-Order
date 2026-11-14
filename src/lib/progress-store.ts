@@ -58,7 +58,7 @@ async function clearDependents(userId: string, item: ContentItem, episode: numbe
     });
   }
 
-  if (!item.required && item.id !== "deadpool-2") return;
+  if (!item.required) return;
   if (item.universe === "xmen" || item.universe === "street") {
     await clearInvalidCompletedItems(userId, item.universe);
   } else {

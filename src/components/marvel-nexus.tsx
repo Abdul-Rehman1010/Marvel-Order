@@ -1050,7 +1050,7 @@ export default function MarvelNexus({ request = browserApiRequest }: { request?:
           <div className="hero-copy">
             <p className="eyebrow"><span className="pulse-dot" /> ACTIVE MISSION // {universe === "mcu" ? "EARTH-616" : universe === "xmen" ? "LEGACY MUTANT" : "STREET-LEVEL"}</p>
             <h1>Road to <em>Doomsday</em></h1>
-            <p>{universe === "xmen" ? "Follow the mutant release order; Deadpool and Deadpool 2 use focused exceptions, while Deadpool 2 and Deadpool & Wolverine remain optional for Doomsday without losing their prerequisites." : universe === "street" ? "Follow each hero's seasons in order and meet the explicit crossover gates; unrelated New York stories can be watched independently." : "Complete every required transmission in release order. The timeline will protect you from what comes next."}</p>
+            <p>{universe === "xmen" ? "Follow the mutant release order; Deadpool and Deadpool 2 use focused exceptions, and both Deadpool 2 and Deadpool & Wolverine are required for Doomsday." : universe === "street" ? "Follow each hero's seasons in order and meet the explicit crossover gates; unrelated New York stories can be watched independently." : "Complete every required transmission in release order. The timeline will protect you from what comes next."}</p>
           </div>
           <DoomsdayCountdown />
         </div>
