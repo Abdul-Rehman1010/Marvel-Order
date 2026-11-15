@@ -329,7 +329,7 @@ export function LoreExperience({
       <div ref={scrollRef} className="lore-scroll">
         <header className="lore-topbar">
           <button className="lore-back" onClick={requestClose} aria-label="Back to dashboard">
-            <ArrowLeft size={17} /> Back <kbd className="lore-esc-hint">Esc</kbd>
+            <ArrowLeft size={17} /> Back
           </button>
           <div className="lore-chapter-label">
             <span>{String(activeChapterIndex + 1).padStart(2, "0")} / {String(CHAPTERS.length).padStart(2, "0")}</span>

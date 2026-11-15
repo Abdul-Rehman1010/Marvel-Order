@@ -62,13 +62,13 @@ import { PacePlanner } from "@/components/nexus/pace-planner";
 import { MultiverseShelf } from "@/components/nexus/multiverse-shelf";
 import { AuthPosterWall } from "@/components/nexus/auth-poster-wall";
 import { LoreExperience } from "@/components/nexus/lore-experience";
+import { InstallAppButton } from "@/components/nexus/install-app";
 
 type User = { id: string; username: string };
 type ProgressRecord = { contentId: string; episode: number };
 type RequirementFilter = "all" | "doomsday" | "optional";
 type FormatFilter = "all" | "movie" | "series" | "special";
 type PendingUnwatch = { item: ContentItem; episode: number; newerRecords: ProgressRecord[] };
-type ScrollRequest = { contentId: string; token: number };
 export type NexusApiRequest = (path: string, init?: RequestInit) => Promise<Response>;
 
 const browserApiRequest: NexusApiRequest = (path, init) => fetch(path, init);
@@ -723,11 +723,9 @@ export default function MarvelNexus({ request = browserApiRequest }: { request?:
   const delightIdRef = useRef(0);
   const [loadError, setLoadError] = useState("");
   const [pendingUnwatch, setPendingUnwatch] = useState<PendingUnwatch | null>(null);
-  const [scrollRequest, setScrollRequest] = useState<ScrollRequest | null>(null);
   const [watchCatalogue, setWatchCatalogue] = useState<WatchLinkCatalogue & { loaded: boolean }>({ links: new Map(), issues: [], loaded: false });
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [nextCardVisible, setNextCardVisible] = useState(true);
-  const scrollToken = useRef(0);
   const tabRefs = useRef<Record<Universe, HTMLButtonElement | null>>({ mcu: null, xmen: null, street: null });
   const searchInputRef = useRef<HTMLInputElement>(null);
   useGlassSpotlight();
@@ -832,7 +830,8 @@ export default function MarvelNexus({ request = browserApiRequest }: { request?:
   function pushDelightToast(toast: DelightToastInput, ttlMs = 5600) {
     delightIdRef.current += 1;
     const id = delightIdRef.current;
-    setDelightToasts((current) => [...current, { ...toast, id }]);
+    // One toast per kind: rapid marking replaces instead of stacking.
+    setDelightToasts((current) => [...current.filter((existing) => existing.kind !== toast.kind), { ...toast, id }]);
     window.setTimeout(() => dismissDelightToast(id), ttlMs);
   }
 
@@ -865,8 +864,9 @@ export default function MarvelNexus({ request = browserApiRequest }: { request?:
           const amount = formatRuntime(unitSeconds).replace(" 00s", "");
           pushDelightToast({ kind: "checkpoint", title: "Checkpoint secured", detail: countsTowardDoomsday ? `${amount} closer to Doomsday` : `${amount} logged in your archive` });
         }
-        for (const revealed of detectNewlyUnlocked(item, watched, newWatched).slice(0, 3)) {
-          pushDelightToast({ kind: "unlock", item: revealed }, 6800);
+        const revealed = detectNewlyUnlocked(item, watched, newWatched);
+        if (revealed.length) {
+          pushDelightToast({ kind: "unlock", item: revealed[0], more: revealed.length - 1 }, 6800);
         }
         for (const milestone of detectMilestones(item, watched, newWatched)) {
           pushDelightToast(milestone, 7200);
@@ -908,19 +908,6 @@ export default function MarvelNexus({ request = browserApiRequest }: { request?:
       setNotice("Could not close the local session. Try again.");
     }
   }
-
-  useEffect(() => {
-    if (!scrollRequest) return;
-    const frame = window.requestAnimationFrame(() => {
-      const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-      const phoneLayout = window.matchMedia("(max-width: 580px)").matches;
-      document.getElementById(`timeline-item-${scrollRequest.contentId}`)?.scrollIntoView({
-        behavior: reduceMotion ? "auto" : "smooth",
-        block: phoneLayout ? "start" : "center",
-      });
-    });
-    return () => window.cancelAnimationFrame(frame);
-  }, [scrollRequest, universe]);
 
   useEffect(() => {
     if (!user) return undefined;
@@ -1035,6 +1022,7 @@ export default function MarvelNexus({ request = browserApiRequest }: { request?:
         <div className="operator-block">
           <span className="vault-status"><i /> {databaseMode}</span>
           <div className="operator-name"><CircleUserRound size={18} /><div><small>OPERATOR</small><strong>{user.username}</strong></div></div>
+          <InstallAppButton />
           <button className="icon-button" onClick={() => setPaletteOpen(true)} aria-label="Search the archive (Ctrl K)"><Search size={17} /></button>
           <button className="mobile-lore-action" onClick={() => setLoreOpen(true)} aria-label="Open lore brief"><Orbit size={17} /><span>Lore</span></button>
           <button className="icon-button" onClick={logout} aria-label="Log out"><LogOut size={17} /></button>
@@ -1171,8 +1159,12 @@ export default function MarvelNexus({ request = browserApiRequest }: { request?:
         <button
           className="jump-pill"
           onClick={() => {
-            scrollToken.current += 1;
-            setScrollRequest({ contentId: nextRequired.id, token: scrollToken.current });
+            const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+            const phoneLayout = window.matchMedia("(max-width: 580px)").matches;
+            document.getElementById(`timeline-item-${nextRequired.id}`)?.scrollIntoView({
+              behavior: reduceMotion ? "auto" : "smooth",
+              block: phoneLayout ? "start" : "center",
+            });
           }}
         >
           <ArrowDown size={14} /> Next: <span>{nextRequired.title}</span>

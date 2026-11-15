@@ -5,7 +5,7 @@ import { PartyPopper, Sparkles, X } from "lucide-react";
 import type { ContentItem } from "@/lib/content";
 
 export type DelightToastInput =
-  | { kind: "unlock"; item: ContentItem }
+  | { kind: "unlock"; item: ContentItem; more: number }
   | { kind: "checkpoint"; title: string; detail: string }
   | { kind: "milestone"; title: string; detail: string };
 
@@ -37,7 +37,7 @@ export function ToastStack({
             {toast.kind === "unlock" ? (
               <>
                 <strong>New transmission unlocked</strong>
-                <p>{toast.item.title} is ready to watch.</p>
+                <p>{toast.item.title} is ready to watch.{toast.more > 0 && ` +${toast.more} more unlocked.`}</p>
               </>
             ) : (
               <>
