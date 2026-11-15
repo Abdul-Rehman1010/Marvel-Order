@@ -12,6 +12,9 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
+    // Scratch output (screenshots, Playwright reports and traces) and coverage.
+    ".tmp/**",
+    "coverage/**",
   ]),
 ]);
 

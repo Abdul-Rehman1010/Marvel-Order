@@ -13,6 +13,9 @@
 # testing
 /coverage
 
+# scratch space for tests and agents: throwaway databases, screenshots, Playwright output
+.tmp/
+
 # next.js
 /.next/
 /out/

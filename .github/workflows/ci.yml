@@ -1,0 +1,75 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+# A newer push to the same branch or pull request makes the older run pointless.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      # Never use the default `marvel-vault.db`: build and tests run against a throwaway file.
+      TURSO_DATABASE_URL: file:.tmp/ci.db
+      NEXT_TELEMETRY_DISABLED: "1"
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      # The same commands a developer runs locally (see "Definition of done" in NEXT_LEVEL_PLAN.md).
+      - run: npm run lint
+      - run: npm run typecheck
+      - run: npm test
+
+      # libSQL does not create parent folders, and importing the database module during the build opens the file.
+      - run: mkdir -p .tmp
+      - run: npm run build
+
+      # End-to-end smoke test. The browser download is cached per Playwright version; the system
+      # libraries it needs are not part of that cache, so they are installed on a cache hit too.
+      - name: Read Playwright version
+        id: playwright
+        run: echo "version=$(node -p "require('@playwright/test/package.json').version")" >> "$GITHUB_OUTPUT"
+
+      - name: Cache Playwright browsers
+        id: playwright-cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ steps.playwright.outputs.version }}
+
+      - name: Install Playwright browser and system libraries
+        if: steps.playwright-cache.outputs.cache-hit != 'true'
+        run: npx playwright install --with-deps chromium
+
+      - name: Install Playwright system libraries only
+        if: steps.playwright-cache.outputs.cache-hit == 'true'
+        run: npx playwright install-deps chromium
+
+      - name: Smoke test
+        run: npx playwright test tests/e2e/smoke.spec.ts
+
+      - name: Upload Playwright report
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: |
+            .tmp/playwright-report
+            .tmp/test-results
+          if-no-files-found: ignore
+          retention-days: 7

@@ -1,0 +1,322 @@
+<title>Doom Flix Roadmap</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Space+Grotesk:wght@500;700&display=swap">
+<!--
+  Source of the shareable roadmap page (NEXT_LEVEL_PLAN.md, package 0.1). It is an Artifact page, so it has no
+  doctype or <head> of its own: the Artifact tool wraps it at publish time. Republish this same file at each
+  milestone after updating the status chips and the "done" counts below. Describe security work only as
+  "account security hardening": this page is meant to be shared.
+-->
+<style>
+  /* Layout: one narrow reading column. The milestones hang off a vertical spine; the Doomsday date sits on that
+     spine between M3 and M4, at its real place in time, because the plan is built around the date. */
+  :root {
+    /* The app's own tokens (src/app/globals.css), so the roadmap looks like Doom Flix. Dark first. */
+    --bg: #070b08;
+    --surface: #0d1510;
+    --raised: #132019;
+    --fg: #eef7f0;
+    --fg-2: #b7c9ba;
+    --muted: #829688;
+    --border: #2a4231;
+    --accent: #46e07c;
+    --accent-hi: #a8ff60;
+    --accent-ink: #052811;
+    --gold: #f0c75e;
+    --font-body: "Inter", system-ui, -apple-system, "Segoe UI", sans-serif;
+    --font-display: "Space Grotesk", "Inter", system-ui, sans-serif;
+    color-scheme: dark;
+  }
+  @media (prefers-color-scheme: light) {
+    :root:not([data-theme="dark"]) {
+      --bg: #f3f7f3;
+      --surface: #ffffff;
+      --raised: #e8f0e9;
+      --fg: #0c1a11;
+      --fg-2: #2f4536;
+      --muted: #4f6656;
+      --border: #c6d6ca;
+      --accent: #17783f;
+      --accent-hi: #2f7d0c;
+      --accent-ink: #ffffff;
+      --gold: #8a6500;
+      color-scheme: light;
+    }
+  }
+  :root[data-theme="light"] {
+    --bg: #f3f7f3;
+    --surface: #ffffff;
+    --raised: #e8f0e9;
+    --fg: #0c1a11;
+    --fg-2: #2f4536;
+    --muted: #4f6656;
+    --border: #c6d6ca;
+    --accent: #17783f;
+    --accent-hi: #2f7d0c;
+    --accent-ink: #ffffff;
+    --gold: #8a6500;
+    color-scheme: light;
+  }
+
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--fg);
+    font-family: var(--font-body);
+    font-size: 16px;
+    line-height: 1.6;
+    padding-left: max(16px, env(safe-area-inset-left, 0px));
+    padding-right: max(16px, env(safe-area-inset-right, 0px));
+    padding-block: 40px 56px;
+  }
+  .page { max-width: 760px; margin: 0 auto; display: flex; flex-direction: column; gap: 56px; }
+
+  h1, h2, h3 { font-family: var(--font-display); margin: 0; text-wrap: balance; }
+  p { margin: 0; }
+  .eyebrow {
+    font: 600 12px/1.2 var(--font-display);
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--muted);
+  }
+
+  /* Masthead */
+  .masthead { display: flex; flex-direction: column; gap: 16px; }
+  h1 { font-size: clamp(2.4rem, 8vw, 3.75rem); line-height: 1.02; font-weight: 700; letter-spacing: -0.02em; }
+  h1 em { font-style: normal; color: var(--accent-hi); }
+  .lede { max-width: 56ch; color: var(--fg-2); font-size: 1.0625rem; }
+  .countdown {
+    margin-top: 8px;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: 6px 12px;
+    padding-top: 16px;
+    border-top: 1px solid var(--border);
+    color: var(--fg-2);
+  }
+  .countdown strong { font: 700 2rem/1 var(--font-display); color: var(--fg); font-variant-numeric: tabular-nums; }
+
+  h2 { font-size: 1.5rem; line-height: 1.2; font-weight: 700; margin-bottom: 20px; }
+
+  /* The four problems: a plain two-column list, ruled from above. Not numbered, because the order is not a sequence. */
+  .problems { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 28px 32px; }
+  .problems li { border-top: 2px solid var(--border); padding-top: 12px; min-width: 0; }
+  .problems h3 { font-size: 1.0625rem; margin-bottom: 4px; }
+  .problems p { color: var(--fg-2); font-size: 0.9375rem; }
+
+  /* Milestone spine */
+  .spine { list-style: none; margin: 0; padding: 0; position: relative; display: flex; flex-direction: column; gap: 28px; }
+  .spine::before {
+    content: "";
+    position: absolute;
+    left: 6.5rem;
+    top: 8px;
+    bottom: 8px;
+    width: 2px;
+    background: var(--border);
+  }
+  .ms { display: grid; grid-template-columns: 6.5rem minmax(0, 1fr); column-gap: 28px; position: relative; }
+  .ms-date { display: flex; flex-direction: column; gap: 2px; padding-top: 2px; padding-right: 20px; text-align: right; }
+  .ms-code { font: 700 1.25rem/1 var(--font-display); color: var(--fg); }
+  .ms-when { font-size: 0.8125rem; color: var(--muted); font-variant-numeric: tabular-nums; }
+  .ms-body { position: relative; display: flex; flex-direction: column; gap: 8px; min-width: 0; padding-bottom: 4px; }
+  .ms-body::before {
+    content: "";
+    position: absolute;
+    left: -35px;
+    top: 7px;
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+    background: var(--bg);
+    border: 2px solid var(--muted);
+  }
+  .ms[data-state="active"] .ms-body::before { background: var(--accent); border-color: var(--accent); box-shadow: 0 0 0 4px color-mix(in srgb, var(--accent) 22%, transparent); }
+  .ms[data-state="done"] .ms-body::before { background: var(--accent); border-color: var(--accent); }
+  .ms-head { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; }
+  .ms-head h3 { font-size: 1.25rem; line-height: 1.25; }
+  .ms-gets { color: var(--fg-2); max-width: 60ch; }
+  .ms-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; font-size: 0.8125rem; color: var(--muted); }
+  .segments { display: inline-flex; gap: 3px; }
+  .segments i { display: block; width: 14px; height: 6px; border-radius: 2px; background: var(--border); }
+  .segments i.on { background: var(--accent); }
+
+  /* Status chip: the dot shape and the words carry the state, not just the colour. */
+  .chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 2px 10px 2px 8px;
+    border-radius: 999px;
+    border: 1px solid var(--border);
+    font: 600 0.75rem/1.5 var(--font-body);
+    color: var(--fg-2);
+    white-space: nowrap;
+  }
+  .chip::before { content: ""; width: 8px; height: 8px; border-radius: 50%; border: 2px solid var(--muted); }
+  .chip-active { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
+  .chip-active::before { background: var(--accent-ink); border-color: var(--accent-ink); }
+  .chip-done { border-color: var(--accent); color: var(--accent); }
+  .chip-done::before { background: var(--accent); border-color: var(--accent); }
+
+  /* The release date, drawn as a marker on the spine. */
+  .marker { display: grid; grid-template-columns: 6.5rem minmax(0, 1fr); column-gap: 28px; position: relative; align-items: center; }
+  .marker-date { text-align: right; padding-right: 20px; font: 700 1.25rem/1 var(--font-display); color: var(--gold); }
+  .marker-body {
+    position: relative;
+    padding: 10px 14px;
+    border: 1px solid var(--gold);
+    border-radius: 6px;
+    background: color-mix(in srgb, var(--gold) 9%, var(--bg));
+    min-width: 0;
+  }
+  .marker-body::before {
+    content: "";
+    position: absolute;
+    left: -36px;
+    top: 50%;
+    width: 14px;
+    height: 14px;
+    margin-top: -7px;
+    transform: rotate(45deg);
+    background: var(--gold);
+  }
+  .marker-body strong { display: block; font-family: var(--font-display); }
+  .marker-body span { color: var(--fg-2); font-size: 0.875rem; }
+
+  footer { border-top: 1px solid var(--border); padding-top: 16px; color: var(--muted); font-size: 0.8125rem; display: flex; flex-wrap: wrap; gap: 4px 16px; justify-content: space-between; }
+
+  @media (max-width: 600px) {
+    body { padding-block: 28px 40px; }
+    .page { gap: 44px; }
+    .problems { grid-template-columns: minmax(0, 1fr); gap: 20px; }
+    .spine::before { left: 7px; }
+    .ms, .marker { grid-template-columns: minmax(0, 1fr); padding-left: 30px; row-gap: 6px; }
+    .ms-date { flex-direction: row; align-items: baseline; gap: 10px; padding-right: 0; text-align: left; }
+    .marker-date { padding-right: 0; text-align: left; }
+    .ms-body::before { left: -30px; }
+    .marker-body::before { left: -30px; }
+  }
+  @media (prefers-reduced-motion: reduce) { * { transition: none !important; animation: none !important; } }
+</style>
+
+<div class="page">
+  <header class="masthead">
+    <p class="eyebrow">Roadmap · updated 15 Nov 2026</p>
+    <h1>Doom Flix, <em>next level</em></h1>
+    <p class="lede">A spoiler-safe Marvel watch-order tracker built around the countdown to <i>Avengers: Doomsday</i>. This is the plan to make it quicker to start, safer to use, and ready for the day the film lands and the days after it.</p>
+    <p class="countdown">
+      <strong id="days-count">33</strong>
+      <span id="days-label">days to Doomsday · 18 Dec 2026</span>
+    </p>
+  </header>
+
+  <section aria-labelledby="fixing">
+    <h2 id="fixing">What we are fixing</h2>
+    <ul class="problems">
+      <li>
+        <h3>The premise has a deadline</h3>
+        <p>The app is built around one date, 18 December, and nothing is designed for the day after.</p>
+      </li>
+      <li>
+        <h3>Starting is slow</h3>
+        <p>Catching up on the 103 required checkpoints takes about a hundred separate taps, one at a time.</p>
+      </li>
+      <li>
+        <h3>The list is buried</h3>
+        <p>On a laptop the first title starts roughly 1,400 px down the page, below a stack of dashboard panels.</p>
+      </li>
+      <li>
+        <h3>Progress needs a safety net</h3>
+        <p>The ticking and un-ticking rules get automated tests and all-or-nothing saves, so a tap can never remove the wrong thing.</p>
+      </li>
+    </ul>
+  </section>
+
+  <section aria-labelledby="milestones">
+    <h2 id="milestones">Milestones</h2>
+    <ol class="spine">
+      <li class="ms" data-state="active">
+        <div class="ms-date"><span class="ms-code">M0</span><time class="ms-when" datetime="2026-11-17">Nov 17</time></div>
+        <div class="ms-body">
+          <div class="ms-head"><h3>Foundations</h3><span class="chip chip-active">In progress</span></div>
+          <p class="ms-gets">Nothing you will see. Automated tests, continuous checks, screenshots and database upgrades: the safety net for everything after.</p>
+          <p class="ms-meta"><span class="segments" aria-hidden="true"><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i></i><i></i></span><span>4 of 6 work packages done</span></p>
+        </div>
+      </li>
+      <li class="ms" data-state="planned">
+        <div class="ms-date"><span class="ms-code">M1</span><time class="ms-when" datetime="2026-11-20">Nov 20</time></div>
+        <div class="ms-body">
+          <div class="ms-head"><h3>Correct and safe</h3><span class="chip">Planned</span></div>
+          <p class="ms-gets">Progress can no longer be lost or left half-saved, plus account security hardening and a proper account panel.</p>
+          <p class="ms-meta"><span class="segments" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></span><span>0 of 5 work packages done</span></p>
+        </div>
+      </li>
+      <li class="ms" data-state="planned">
+        <div class="ms-date"><span class="ms-code">M2</span><time class="ms-when" datetime="2026-11-29">Nov 29</time></div>
+        <div class="ms-body">
+          <div class="ms-head"><h3>Fast start, fast flow</h3><span class="chip">Planned</span></div>
+          <p class="ms-gets">Catch up in under a minute. Skip a title without getting stuck. Ticks that respond instantly, with Undo. An “Up next” panel with one-tap marking on the first screen, denser cards, shareable links, and a Back button that works.</p>
+          <p class="ms-meta"><span class="segments" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></span><span>0 of 8 work packages done</span></p>
+        </div>
+      </li>
+      <li class="ms" data-state="planned">
+        <div class="ms-date"><span class="ms-code">M3</span><time class="ms-when" datetime="2026-12-10">Dec 10</time></div>
+        <div class="ms-body">
+          <div class="ms-head"><h3>The deadline</h3><span class="chip">Planned</span></div>
+          <p class="ms-gets">Doomsday becomes a mission with its own finale checkpoint. Essential-path triage for people short on time, a dated nightly schedule, stats and achievements, Doomsday Wrapped and a share card.</p>
+          <p class="ms-meta"><span class="segments" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></span><span>0 of 5 work packages done</span></p>
+        </div>
+      </li>
+
+      <li class="marker">
+        <div class="marker-date">Dec 18</div>
+        <div class="marker-body"><strong>Avengers: Doomsday releases</strong><span>M0 to M3 land before this date.</span></div>
+      </li>
+
+      <li class="ms" data-state="planned">
+        <div class="ms-date"><span class="ms-code">M4</span><span class="ms-when">Early Jan</span></div>
+        <div class="ms-body">
+          <div class="ms-head"><h3>Reach</h3><span class="chip">Planned</span></div>
+          <p class="ms-gets">Try it without an account. A mobile app shell, offline support and push reminders.</p>
+          <p class="ms-meta"><span class="segments" aria-hidden="true"><i></i><i></i><i></i><i></i></span><span>0 of 4 work packages done</span></p>
+        </div>
+      </li>
+      <li class="ms" data-state="planned">
+        <div class="ms-date"><span class="ms-code">M5</span><span class="ms-when">Jan – Feb</span></div>
+        <div class="ms-body">
+          <div class="ms-head"><h3>Depth</h3><span class="chip">Planned</span></div>
+          <p class="ms-gets">A catalogue that refreshes itself, with real where-to-watch. Post-credit counts, trailers, notes and character threads, an interactive timeline map, and the road to what comes after Doomsday.</p>
+          <p class="ms-meta"><span class="segments" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></span><span>0 of 5 work packages done</span></p>
+        </div>
+      </li>
+    </ol>
+  </section>
+
+  <footer>
+    <span>Republished at each milestone.</span>
+    <span>Dates are targets, counted from 15 Nov 2026.</span>
+  </footer>
+</div>
+
+<script>
+  // Keep the countdown honest if the page is opened after the plan date. The text above is the fallback.
+  (function () {
+    try {
+      var now = new Date();
+      var today = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate());
+      var days = Math.round((Date.UTC(2026, 11, 18) - today) / 86400000);
+      var count = document.getElementById("days-count");
+      var label = document.getElementById("days-label");
+      if (!count || !label) return;
+      if (days > 1) { count.textContent = String(days); label.textContent = "days to Doomsday · 18 Dec 2026"; }
+      else if (days === 1) { count.textContent = "1"; label.textContent = "day to Doomsday · 18 Dec 2026"; }
+      else if (days === 0) { count.textContent = "Today"; label.textContent = "Doomsday arrives · 18 Dec 2026"; }
+      else { count.textContent = "Out now"; label.textContent = "Avengers: Doomsday released 18 Dec 2026"; }
+    } catch (error) { /* keep the fallback text */ }
+  })();
+</script>
