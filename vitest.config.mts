@@ -32,6 +32,9 @@ export default defineConfig({
     // Pure engine and API tests run in Node. A component test opts into jsdom
     // with a file-level `// @vitest-environment jsdom` comment.
     environment: "node",
+    // Safety net: anything that imports `src/lib/db.ts` under test opens a scratch file, never the
+    // owner's `marvel-vault.db`. Tests that need a specific database override this with `vi.stubEnv`.
+    env: { TURSO_DATABASE_URL: "file:.tmp/vitest-default.db", TURSO_AUTH_TOKEN: "" },
     include: ["tests/unit/**/*.test.{ts,tsx}", "tests/api/**/*.test.{ts,tsx}"],
   },
 });
