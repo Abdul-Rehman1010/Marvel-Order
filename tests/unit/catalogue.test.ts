@@ -1,5 +1,5 @@
 /**
- * Invariants of the content catalogue (src/lib/content.ts). These are data-quality
+ * Invariants of the content catalogue (src/lib/catalogue). These are data-quality
  * checks: they fail when someone adds a title with a typo, an unsorted date or no art.
  */
 import { existsSync } from "node:fs";
@@ -12,10 +12,10 @@ import {
   CONTENT_BY_ID,
   UNIVERSE_CONTENT,
   getPrerequisiteChain,
-  priorRequiredItems,
   type ContentItem,
   type Universe,
 } from "@/lib/content";
+import { directPrerequisites } from "@/lib/engine/graph";
 import { backdropUrl, posterUrl } from "@/lib/media";
 
 const PUBLIC_DIR = path.join(process.cwd(), "public");
@@ -28,9 +28,10 @@ const PUBLIC_DIR = path.join(process.cwd(), "public");
 const PLACEHOLDER_ART_ALLOW_LIST: ReadonlySet<string> = new Set<string>();
 
 /**
- * A literal copy of today's explicit Street-Level prerequisites (the private
- * `STREET_PREREQUISITE_IDS` table in content.ts). Package 1.2 turns these into
- * `requires` fields on the catalogue items; this copy then keeps pinning them.
+ * A literal copy of the Street-Level prerequisites from before package 1.2 (the private
+ * `STREET_PREREQUISITE_IDS` table in content.ts, plus the hard-coded rule that Hawkeye
+ * needs Endgame). Since 1.2 they are the `requires` fields in `src/lib/catalogue/street.ts`;
+ * this copy pins them, so changing a Street gate means changing this table on purpose.
  */
 const STREET_DIRECT_PREREQUISITES: Record<string, string[]> = {
   "defenders-daredevil-1": [],
@@ -52,7 +53,7 @@ const STREET_DIRECT_PREREQUISITES: Record<string, string[]> = {
   "defenders-daredevil-3": ["defenders-daredevil-2", "defenders-the-defenders"],
   "defenders-punisher-2": ["defenders-punisher-1"],
   "defenders-jessica-jones-3": ["defenders-jessica-jones-2", "defenders-the-defenders"],
-  hawkeye: [],
+  hawkeye: ["endgame"],
   echo: ["hawkeye"],
   "born-again-1": ["defenders-daredevil-3"],
   "born-again-2": ["born-again-1"],
@@ -86,22 +87,29 @@ describe("prerequisites", () => {
   const streetItems = UNIVERSE_CONTENT.street;
 
   it("have an explicit entry for every Street title and no extras", () => {
-    // Street is the only universe with an explicit table; every other title is chain-based.
+    // Street is the only universe with an explicit policy; every other title is chain-based.
     expect(streetItems.map((item) => item.id).sort()).toEqual(Object.keys(STREET_DIRECT_PREREQUISITES).sort());
   });
 
-  it("only references ids that exist", () => {
-    const unknown = Object.entries(STREET_DIRECT_PREREQUISITES).flatMap(([id, requires]) =>
-      [id, ...requires].filter((candidate) => !CONTENT_BY_ID.has(candidate)),
+  it("are declared on every Street title as `requires`, matching the pinned table", () => {
+    for (const item of streetItems) {
+      expect(item.requires, item.id).toEqual(STREET_DIRECT_PREREQUISITES[item.id]);
+      expect(item.alsoRequires, item.id).toBeUndefined();
+    }
+  });
+
+  it("only reference ids that exist (every `requires` and `alsoRequires` entry)", () => {
+    const unknown = CONTENT.flatMap((item) =>
+      [...(item.requires ?? []), ...(item.alsoRequires ?? [])]
+        .filter((candidate) => !CONTENT_BY_ID.has(candidate))
+        .map((candidate) => `${item.id} -> ${candidate}`),
     );
     expect(unknown).toEqual([]);
   });
 
-  it("are what priorRequiredItems returns for Street titles", () => {
+  it("are what the graph uses as the direct prerequisites of Street titles", () => {
     for (const item of streetItems) {
-      expect(priorRequiredItems(item).map((prerequisite) => prerequisite.id), item.id).toEqual(
-        STREET_DIRECT_PREREQUISITES[item.id],
-      );
+      expect(directPrerequisites(item.id), item.id).toEqual(STREET_DIRECT_PREREQUISITES[item.id]);
     }
   });
 

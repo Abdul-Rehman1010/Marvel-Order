@@ -331,7 +331,7 @@ Titles in `code` are catalogue ids. "Full account" means every released unit wat
 #### 1.2 Split catalogue and engine; make prerequisites declarative (pure refactor)
 - Depends on 0.2. Move the data arrays to `src/lib/catalogue/*`, add the override fields from §4.4, build `graph.ts`, and re-export everything from `src/lib/content.ts` under today's names so no other file changes.
 - Remove the hard-coded special cases from `priorRequiredItems` / `directPrerequisiteItems` (`["deadpool","deadpool-2","moon-knight"]`, the `hawkeye`, `deadpool`, `deadpool-2`, `multiverse-of-madness` branches) in favour of the data.
-- [ ] Acceptance: the characterisation snapshot from 0.2 is **byte-identical**; `graph.ts` has tests for cycle detection and unknown ids.
+- [x] Acceptance: the characterisation snapshot from 0.2 is **byte-identical**; `graph.ts` has tests for cycle detection and unknown ids. *(Done 2026-11-16: `tests/unit/characterisation.test.ts` is untouched and passes; `tests/unit/graph.test.ts` covers cycles, unknown ids and the other build errors, the §4.4 spot values and the §4.7 graph rows. See the 1.2 record.)*
 
 #### 1.3 Reducer, transactional persistence and the progress bug fixes
 - Depends on 0.5, 1.2. Implement `state.ts`, `release.ts`, `reducer.ts`, `stats.ts`, `format.ts` (§4.4), migration 2, and `applyUserAction` (§4.5). Rewrite `POST /api/progress` on top of it; delete `clearDependents` and `clearInvalidCompletedItems`.
@@ -651,3 +651,43 @@ Each package appends here when it is done: what changed, anything that differs f
 **Verification after 0.6, 2026-11-15** (scratch databases only): lint 0 errors (same one warning); typecheck clean; `npm test` 55 passed; `npm run build` OK (the `/_not-found` route is generated); `npx playwright test` 6 passed with unchanged layout numbers; `marvel-vault.db` and `public/watch-links.csv` untouched.
 
 **Observed, not acted on.** `npm audit` reports 10 findings, all in packages that were already installed (none come from the test tooling): `next` 16.3.5 (critical: remote code execution in `next/og` `ImageResponse`; the audit lists 16.4.6 as a non-major fix), `zod` and `sharp` (high), and the typescript-eslint and minimatch chain (moderate). The app uses `ImageResponse` for its icons and 3.5 plans to use it for the share card. Updating `next` is a decision for the owner; the `AGENTS.md` warning about breaking changes applies.
+
+### M1 — Correct and safe (in progress: 1.2 done on 2026-11-16; 1.3–1.6 not started)
+
+**1.2 Catalogue and graph** (Opus, 2026-11-16).
+- **Catalogue split.** `src/lib/content.ts` was split by script, so the data was moved, not retyped: `src/lib/catalogue/types.ts`, `mcu.ts`, `xmen.ts`, `street.ts`, `index.ts`, plus two files the §4.2 layout does not list: `build.ts` (the `movie` / `series` / `special` / `episodes` builders the universe files share) and `summaries.ts` (`MOVIE_SUMMARIES`, still applied in `index.ts` exactly as before). `ContentItem` gained `requires?: string[]` and `alsoRequires?: string[]`. Files in `catalogue/` import each other relatively, because `scripts/catalogue-check.mjs` loads the catalogue without the `@/` alias (it still reports the same 12 titles).
+- **Declarative prerequisites.** The overrides from §4.4 are now data: `moon-knight` `requires: []`, `multiverse-of-madness` `alsoRequires: ["xmen-2000"]`, `deadpool` `requires: ["xmen-2000"]`, `deadpool-2` `requires: ["deadpool"]`, `hawkeye` `requires: ["endgame"]`, and every other Street title carries its old `STREET_PREREQUISITE_IDS` list as `requires` (the fourth argument of `streetSeries`). The table and every hard-coded id in `priorRequiredItems` / `directPrerequisiteItems` are gone.
+- **`src/lib/engine/graph.ts`.**
+  - `buildGraph(items, policy?)` builds DIRECT, ANCESTORS and DESCENDANTS once. The direct list is the `requires` override or the universe policy, then `alsoRequires`, de-duplicated, in declared order.
+  - ANCESTORS uses the same post-order walk as the old `getPrerequisiteChain`, so watch order is unchanged.
+  - Building throws when a title names an unknown id, on a cycle (the message names the whole loop), on a duplicated id, and when a Street title has no `requires` list. That last check means a new Street title cannot silently end up with no prerequisites.
+  - Exports: `directPrerequisites(id)`, `prerequisiteChain(id)` (prerequisites in watch order, then the title itself), `dependents(id)` (catalogue order), `reducedEdges()` (`{ from, to }[]`).
+  - Queries for an id the catalogue does not know return empty arrays, never an exception, which is what §4.4 asks for unrecognised user data.
+  - Every query returns a fresh array.
+- **`src/lib/content.ts` is now a barrel.** It re-exports the catalogue and keeps every name the app imported, so no component, route or `progress-store.ts` changed. The lock helpers (`progressKey`, `itemUnits`, `itemComplete`, `missingPrerequisite`, `unlockReason`, `isUnlocked`, `formatRuntime`) stay in this file with today's behaviour until 1.3 replaces them with `state.ts`, `release.ts` and `format.ts`. `missingPrerequisite` walks `directPrerequisites`; this is the same algorithm minus the visited set, which the acyclic check makes unnecessary.
+- **One intended behaviour change, in an export the app does not use.** `priorRequiredItems` (now `@deprecated`, only the old test used it) returns the true direct prerequisites. Before, it left out the overrides that a separate step added back. It now differs for exactly four titles: `deadpool`, `deadpool-2`, `hawkeye` and `multiverse-of-madness`.
+- **Proof it is a pure refactor.**
+  - The six characterisation snapshots pass, and the test file is byte-for-byte untouched.
+  - A one-off script loaded the old and new `content.ts` side by side:
+    - `CONTENT` and every universe list are JSON-identical apart from the new fields;
+    - all 92 chains are identical;
+    - `missingPrerequisite`, `unlockReason`, `isUnlocked` and `itemComplete` agree for all 92 titles in 6,000 random viewing states (random units, release-order prefixes with gaps, partial series), with 0 mismatches.
+- **Tests.**
+  - `tests/unit/catalogue.test.ts` now checks the real `requires` fields against its pinned table. Hawkeye's row there is now `["endgame"]`, since that rule is data now. It also checks that every `requires` / `alsoRequires` id exists, and that the graph's direct lists match.
+  - New `tests/unit/graph.test.ts` (26 tests):
+    - build errors: unknown id in `requires` and in `alsoRequires`, two-title and three-title cycles, a cycle made by an override against the release chain, self-reference, duplicate id, Street title without `requires`;
+    - policy and override behaviour on a made-up catalogue, plus empty answers for unknown ids and fresh arrays;
+    - on the real catalogue: exactly the §4.4 overrides, the §4.4 spot values through the graph API (`xmen-2000` 41 = 13 X-Men + 28 MCU), no optional title with dependents, dependents as the exact inverse of chains, and the §4.7 empty-state missing prerequisites;
+    - reduced edges: a subset of the direct edges, same reachability, minimal, plus spot checks.
+  - `npm test`: 82 passed.
+- **Left for 1.3.** `clearDependents` in `src/lib/progress-store.ts` still has its own hard-coded `multiverse-of-madness` branch. 1.3 deletes that function, so it was not touched here (1.2 changes no behaviour).
+
+**Verification after 1.2, 2026-11-16** (scratch databases only):
+- lint: 0 errors (same one warning);
+- typecheck: clean;
+- `npm test`: 82 passed;
+- `npm run build`: OK;
+- `npm run catalogue:check`: 12 titles, unchanged.
+- Playwright, 6 passed with layout numbers identical to the baseline at all three sizes. A `next dev` the agent did not start (PID 41692, port 3000, almost certainly the owner's) held this folder's dev-server lock, so the run used a production build: `next build` plus `next start -p 3210` on `file:.tmp/e2e.db`, through a temporary config in `.tmp/` that was then deleted. `playwright.config.ts` is unchanged.
+- `marvel-vault.db`: it is 77,824 bytes, modified 2026-11-16 23:23 (it was 73,728 bytes on 2026-11-15), and no agent command opened it. The growth is exactly one 4 KB page, which fits the owner's own dev server running the 0.5 code and creating `schema_migrations` on its first request.
+- `public/watch-links.csv` is untouched.
