@@ -1,5 +1,5 @@
 {
-  "name": "marvel-checklist",
+  "name": "doom-flix",
   "version": "0.1.0",
   "private": true,
   "scripts": {
@@ -26,8 +26,6 @@
     "zod": "^4.6.5"
   },
   "devDependencies": {
-    "@fontsource/inter": "^5.3.0",
-    "@fontsource/space-grotesk": "^5.3.0",
     "@playwright/test": "^1.65.1",
     "@tailwindcss/postcss": "^4",
     "@testing-library/dom": "^10.4.2",

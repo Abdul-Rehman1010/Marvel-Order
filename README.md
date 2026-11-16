@@ -17,8 +17,29 @@ Open [http://localhost:3000](http://localhost:3000). No environment variables or
 
 ```bash
 npm run lint
+npm run typecheck
+npm test
 npm run build
 ```
+
+- `npm test` runs the unit and API tests (Vitest, `tests/unit` and `tests/api`); `npm run test:watch` re-runs them as you edit.
+- `npm run e2e` runs the Playwright smoke and screen specs in Chromium at three screen sizes (the first time, run `npx playwright install chromium`). `npm run shots` runs only the screenshot spec and writes images and `metrics.json` to `.tmp/shots/`.
+- `npm run catalogue:check` lists released titles that still carry placeholder data (`-- --strict` makes it fail when there are any).
+
+### Never point a test or build at your own database
+
+`marvel-vault.db` holds your real accounts and progress. Anything that is not the running app itself (tests, builds, scripts, experiments) must use a throwaway database under `.tmp/` (ignored by Git):
+
+```bash
+mkdir -p .tmp
+TURSO_DATABASE_URL=file:.tmp/scratch.db npm run build
+```
+
+`npm test` and `npm run e2e` already do this. `npm run build` opens the database too, so give it a scratch file as above. In PowerShell set `$env:TURSO_DATABASE_URL = "file:.tmp/scratch.db"` first.
+
+### Styling note
+
+Tailwind CSS is installed only for its CSS reset (`@import "tailwindcss"` in `src/app/globals.css`). All styling is plain CSS in that file; there are no Tailwind utility classes.
 
 ## Data and progression
 
@@ -35,7 +56,7 @@ npm run build
 - *Deadpool 2* and *Deadpool & Wolverine* are required for universal Doomsday readiness.
 - The Street-Level Saga contains the 13 original Defenders-era seasons followed by *Hawkeye*, *Echo*, *Daredevil: Born Again*, and *The Punisher: One Last Kill*.
 - Street-Level entries are displayed by release date, but unrelated shows do not lock one another. Seasons of the same show remain sequential.
-- *The Defenders* requires *Daredevil* Seasons 1â€“2, *Jessica Jones* Season 1, *Luke Cage* Season 1, and *Iron Fist* Season 1; the four heroes' later seasons additionally require the crossover.
+- *The Defenders* requires *Daredevil* Seasons 1–2, *Jessica Jones* Season 1, *Luke Cage* Season 1, and *Iron Fist* Season 1; the four heroes' later seasons additionally require the crossover.
 - *The Punisher* Season 1 requires *Daredevil* Season 2, and *The Punisher* Season 2 follows Season 1.
 - *Hawkeye* retains its *Avengers: Endgame* prerequisite, *Echo* requires *Hawkeye*, *Daredevil: Born Again* follows *Daredevil* Season 3, and *The Punisher: One Last Kill* requires *The Punisher* Season 2.
 - Street-Level progress never gates later MCU releases, and removing progress clears only entries that actually depend on it.

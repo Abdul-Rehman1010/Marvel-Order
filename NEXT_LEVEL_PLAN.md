@@ -322,7 +322,7 @@ Titles in `code` are catalogue ids. "Full account" means every released unit wat
 - Delete unused `public/file.svg`, `globe.svg`, `next.svg`, `vercel.svg`, `window.svg` and the empty `marvel-checklist/` folder.
 - Rename the package to `doom-flix`. Fix the mis-encoded dash in `README.md` ("Seasons 1â€“2"). Document in the README: the scratch-database rule, the test commands, and that Tailwind is kept only for its reset.
 - Add `src/app/error.tsx`, `global-error.tsx`, `not-found.tsx` styled like the existing `.loading-screen.error-screen`.
-- [ ] Acceptance: build and screenshots unchanged.
+- [x] Acceptance: build and screenshots unchanged. *(Done 2026-11-15: build OK; layout numbers identical at all three sizes; every baseline screenshot is pixel-identical except the live clock and one timing difference in the phone drawer shot, see the 0.6 record.)*
 
 ### M1 — Correct and safe
 
@@ -590,7 +590,7 @@ Taken out of this plan on 2026-11-15 (it was package 1.1). What it would involve
 
 Each package appends here when it is done: what changed, anything that differs from the text above, and the numbers the next package needs.
 
-### M0 — Foundations (in progress: 0.1–0.5 done on 2026-11-15; 0.6 not started; the M0 gate, the two-clients migration test, passes)
+### M0 — Foundations (done 2026-11-15: 0.1–0.6; the M0 gate, the two-clients migration test, passes)
 
 **Scope decision (2026-11-15).** The owner removed the watch-link package from this plan (now §9.1). `src/lib/watch-links.ts` is unchanged and no watch-link tests exist.
 
@@ -631,6 +631,13 @@ Each package appends here when it is done: what changed, anything that differs f
 - The real app was checked end to end: after `npx playwright test`, `.tmp/e2e.db` has `schema_migrations` = version 1, written by the server through `ensureDatabase()`.
 - **Owner step, still open.** Before the first production deploy of this build: back up the production Turso database (dump or branch), run this build once against a copy, and confirm the `users`, `sessions` and `progress` row counts are unchanged. Version 1 only creates `schema_migrations` and records itself, so the risk is low, but this is the step the plan requires before migrations 2+ ship. Record the result here.
 
+**0.6 Housekeeping** (Sonnet, 2026-11-15).
+- Removed the dev dependencies `@fontsource/inter` and `@fontsource/space-grotesk` (nothing imported them; fonts come from `next/font/google`). Deleted `public/file.svg`, `globe.svg`, `next.svg`, `vercel.svg`, `window.svg` (no references anywhere) and the empty `marvel-checklist/` folder. Renamed the package to `doom-flix` in `package.json` and `package-lock.json`.
+- README: fixed the mis-encoded dash ("Seasons 1–2"); documented the test commands (`npm test`, `test:watch`, `e2e`, `shots`, `typecheck`, `catalogue:check`), the scratch-database rule (including that `npm run build` opens the database), and that Tailwind is kept only for its reset.
+- Added `src/app/error.tsx`, `global-error.tsx` and `not-found.tsx`, all using the existing `.loading-screen.error-screen` look. **This Next.js version passes `retry` (not `reset`) to error components**, per `node_modules/next/dist/docs/.../error.md`, so they call `retry()`. `global-error.tsx` has to supply its own `<html>`/`<body>` and imports `globals.css`; the web fonts are set in `layout.tsx`, so that one screen falls back to system fonts. The 404 page was checked in a browser (HTTP 404, same look as the existing error screen). The two error screens were not triggered in a browser; they share the same markup as the 404 page and the in-app error screen.
+- **Screenshot check.** Layout numbers are identical to the baseline table (first card 1,379 / 1,379 / 2,242 px; page heights 12,917 / 12,939 / 24,676 px; 29 / 29 / 35 small text nodes; no overflow). Of the 24 baseline images, 16 are byte-identical and 8 differ: seven only in the live countdown clock area, and `phone-390/04-drawer-movie.png`, which sits about 10 px higher. That last one is screenshot timing, not a change: four runs with the 0.6 changes agree with each other, and a run with all 0.6 changes stashed produced the identical image, so the original baseline simply caught the drawer's slide-in slightly earlier.
+- Not done here: `npm audit` findings and the `next` upgrade (see "Observed, not acted on").
+
 **Deviations from the text above.**
 1. `@types/node` moved from ^20 to ^22: vitest 5 declares an optional peer dependency on 22 or newer (matches the Node 22 used in CI). No runtime dependency changed; 108 packages were added, all for testing.
 2. `vite-tsconfig-paths` is **not** installed: Vite 8 resolves tsconfig `paths` natively (`resolve.tsconfigPaths: true`) and warns that the plugin is redundant.
@@ -640,5 +647,7 @@ Each package appends here when it is done: what changed, anything that differs f
 **Verification on 2026-11-15** (scratch databases only): lint 0 errors (one existing warning: `APPROVED_WATCH_HOSTS` unused, see §9.1); typecheck clean; `npm test` 33 passed; `npm run build` OK; `npx playwright test` 6 passed; `marvel-vault.db` has the same SHA-256, size and modified time as before the work; `public/watch-links.csv` still shows only the owner's earlier modification.
 
 **Verification after 0.5, 2026-11-15** (scratch databases only): lint 0 errors (same one warning); typecheck clean; `npm test` 55 passed (33 + 22 migration tests); `npm run build` OK; `npx playwright test` 6 passed with unchanged layout numbers; `marvel-vault.db` still has the same SHA-256, size and modified time.
+
+**Verification after 0.6, 2026-11-15** (scratch databases only): lint 0 errors (same one warning); typecheck clean; `npm test` 55 passed; `npm run build` OK (the `/_not-found` route is generated); `npx playwright test` 6 passed with unchanged layout numbers; `marvel-vault.db` and `public/watch-links.csv` untouched.
 
 **Observed, not acted on.** `npm audit` reports 10 findings, all in packages that were already installed (none come from the test tooling): `next` 16.3.5 (critical: remote code execution in `next/og` `ImageResponse`; the audit lists 16.4.6 as a non-major fix), `zod` and `sharp` (high), and the typescript-eslint and minimatch chain (moderate). The app uses `ImageResponse` for its icons and 3.5 plans to use it for the share card. Updating `next` is a decision for the owner; the `AGENTS.md` warning about breaking changes applies.
