@@ -61,7 +61,7 @@ import {
 import { getStats } from "@/lib/engine/stats";
 import { normalizeWatchTitle, parseWatchLinksCsv, type WatchLinkCatalogue } from "@/lib/watch-links";
 import { backdropUrl, posterUrl } from "@/lib/media";
-import { useDialogBehavior, useGlassSpotlight, usePointerTilt } from "@/lib/use-motion";
+import { useDialogBehavior, useGlassSpotlight, usePointerTilt, usePrefersReducedMotion } from "@/lib/use-motion";
 import { DEFAULT_TINT, POSTER_TINTS } from "@/lib/poster-tints";
 import { DoomClock } from "@/components/nexus/doom-clock";
 import { ProgressReactor } from "@/components/nexus/progress-reactor";
@@ -148,27 +148,41 @@ function LoadingScreen() {
   );
 }
 
-function DeveloperCarousel({ placement }: { placement: "auth" | "dashboard" }) {
+/**
+ * The sign-in screen's rotating introduction. It does not announce itself to screen readers (no
+ * live region), stops rotating while the pointer is over it or focus is inside it, and does not
+ * rotate at all under reduced motion; the dots still switch slides by hand.
+ */
+function DeveloperCarousel() {
   const [activeSlide, setActiveSlide] = useState(0);
+  const [hovered, setHovered] = useState(false);
+  const [focused, setFocused] = useState(false);
+  const reducedMotion = usePrefersReducedMotion();
+  const paused = hovered || focused || reducedMotion;
 
   useEffect(() => {
+    if (paused) return;
     const timer = window.setInterval(() => {
       setActiveSlide((current) => (current + 1) % INTRO_SLIDES.length);
     }, 4600);
     return () => window.clearInterval(timer);
-  }, []);
+  }, [paused]);
 
   const slide = INTRO_SLIDES[activeSlide];
 
   return (
     <section
-      className={`developer-carousel ${placement}`}
+      className="developer-carousel auth"
       role="region"
       aria-roledescription="carousel"
       aria-label="Doom Flix introduction"
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
+      onFocus={() => setFocused(true)}
+      onBlur={() => setFocused(false)}
     >
       <div className="carousel-signal" aria-hidden="true"><Radio size={15} /></div>
-      <div className="carousel-message" key={slide.label} aria-live="polite">
+      <div className="carousel-message" key={slide.label}>
         <span>{slide.label}</span>
         <strong>{slide.title}</strong>
       </div>
@@ -255,7 +269,7 @@ function AuthScreen({ onAuthenticated, request, initialNotice = "" }: { onAuthen
             <div className="brand-mark"><span>D</span></div>
             <div><strong>DOOM FLIX</strong><small>WATCH PROTOCOL</small></div>
           </div>
-          <DeveloperCarousel placement="auth" />
+          <DeveloperCarousel />
         </div>
         <div className="auth-copy">
           <p className="eyebrow"><Radio size={14} /> MISSION // DOOMSDAY</p>
@@ -358,15 +372,27 @@ function detectMilestones(item: ContentItem, oldIndex: ViewingIndex, newIndex: V
   return milestones;
 }
 
+/** "29 movies + 4 specials + 120 episodes", leaving out any part whose count is zero. */
+function checkpointBreakdown(stats: { movies: number; specials: number; totalEpisodes: number }) {
+  return [
+    [stats.movies, "movies"],
+    [stats.specials, "specials"],
+    [stats.totalEpisodes, "episodes"],
+  ]
+    .filter(([count]) => count !== 0)
+    .map(([count, label]) => `${count} ${label}`)
+    .join(" + ");
+}
+
 function CheckpointCounts({ watched, total }: { watched: number; total: number }) {
   return (
     <dl className="checkpoint-counts" aria-label={`${watched} items watched, ${Math.max(0, total - watched)} items remaining`}>
       <div className="watched-count">
-        <dt><Check size={13} /> Watched</dt>
+        <dt><Check size={13} /> <span>Watched</span></dt>
         <dd>{watched}</dd>
       </div>
       <div className="remaining-count">
-        <dt><Clock3 size={13} /> Remaining</dt>
+        <dt><Clock3 size={13} /> <span>Remaining</span></dt>
         <dd>{Math.max(0, total - watched)}</dd>
       </div>
     </dl>
@@ -456,10 +482,12 @@ function TimelineCard({
         <h3>{item.title}</h3>
         <p className="card-phase">{item.phase}</p>
         <p className="card-summary">{item.summary}</p>
-        <div className={`card-availability ${unlocked ? "ready" : "locked"}`} aria-label={unlocked ? `${item.title} is ready to watch` : outOfOrder ? `Watched out of order: ${reason}` : `Locked: ${reason}`}>
-          <span>{unlocked ? <Check size={14} /> : <LockKeyhole size={14} />}{unlocked ? "Ready to watch" : outOfOrder ? "Watched out of order" : "Locked"}</span>
-          {!unlocked && prerequisite && <button title={`Open ${prerequisite.title}`} onClick={() => onOpenPrerequisite(prerequisite)}><span>Open {prerequisite.title}</span><ChevronRight size={14} /></button>}
-        </div>
+        {!unlocked && (
+          <div className="card-availability locked" aria-label={outOfOrder ? `Watched out of order: ${reason}` : `Locked: ${reason}`}>
+            <span><LockKeyhole size={14} />{outOfOrder ? "Watched out of order" : "Locked"}</span>
+            {prerequisite && <button title={`Open ${prerequisite.title}`} onClick={() => onOpenPrerequisite(prerequisite)}><span>Open {prerequisite.title}</span><ChevronRight size={14} /></button>}
+          </div>
+        )}
         {!item.required && <p className="optional-note">Optional entry · excluded from Doomsday readiness</p>}
         <WatchSource item={item} url={watchUrl} loaded={watchLinksLoaded} unlocked={unlocked} placement="card" />
         {item.kind === "series" ? (
@@ -631,6 +659,10 @@ function DetailDrawer({
     const priorDone = index === 0 || watched.has(progressKey(item.id, episode.id - 1));
     return unlocked && priorDone;
   };
+  // A locked title that is not watched offers a way forward instead of a disabled "mark watched":
+  // a button to its earliest unfinished prerequisite, or the release date as plain text.
+  const lockAction: { kind: "go"; item: ContentItem } | { kind: "scheduled"; date: string } | null =
+    complete || !lock ? null : lock.kind === "prerequisite" ? { kind: "go", item: lock.item } : lock.kind === "unreleased" ? { kind: "scheduled", date: lock.date } : null;
   const nextEpisode = item.kind === "series" && !item.dataPending
     ? (item.episodes ?? []).find((episode, index) => !watched.has(progressKey(item.id, episode.id)) && episodeUnlocked(index, episode))
     : undefined;
@@ -678,11 +710,17 @@ function DetailDrawer({
             </section>
           )}
         </div>
-        <div className={`drawer-command-bar ${item.kind === "series" && !nextEpisode ? "single" : ""}`}>
+        <div className={`drawer-command-bar ${!lockAction && item.kind === "series" && !nextEpisode ? "single" : ""}`}>
           <WatchSource item={item} url={watchUrl} loaded={watchLinksLoaded} unlocked={unlocked} placement="drawer" />
-          {item.kind !== "series" && (
-            <button className="primary-action drawer-action" disabled={busyKey === progressKey(item.id) || (!complete && !unlocked)} onClick={() => onToggle(item, -1, !complete)}>
-              {complete ? "Remove watched status" : unlocked ? "Mark as watched" : "Complete prerequisite first"}{complete ? <X size={17} /> : <Check size={17} />}
+          {lockAction?.kind === "go" && (
+            <button className="primary-action drawer-action drawer-go" title={`Go to ${lockAction.item.title}`} onClick={() => onOpenPrerequisite(lockAction.item)}>
+              <span>Go to {lockAction.item.title}</span><ArrowRight size={17} />
+            </button>
+          )}
+          {lockAction?.kind === "scheduled" && <p className="drawer-release-note"><Clock3 size={15} /> Releases {dateLabel(lockAction.date)}</p>}
+          {!lockAction && item.kind !== "series" && (
+            <button className="primary-action drawer-action" disabled={busyKey === progressKey(item.id)} onClick={() => onToggle(item, -1, !complete)}>
+              {complete ? "Remove watched status" : "Mark as watched"}{complete ? <X size={17} /> : <Check size={17} />}
             </button>
           )}
           {item.kind === "series" && nextEpisode && (
@@ -1062,12 +1100,7 @@ export default function MarvelNexus({ request = browserApiRequest }: { request?:
           <div><strong>DOOM FLIX</strong><small>WATCH PROTOCOL</small></div>
         </div>
         <nav>
-          <button className="nav-active"><Layers3 size={15} /> Timeline</button>
           <button onClick={() => setLoreOpen(true)}><Orbit size={15} /> Lore brief</button>
-          <span className="topbar-divider" aria-hidden="true" />
-          <button className="topbar-tab" aria-pressed={universe === "mcu"} onClick={() => selectUniverse("mcu")}>MCU</button>
-          <button className="topbar-tab" aria-pressed={universe === "xmen"} onClick={() => selectUniverse("xmen")}>X-Men</button>
-          <button className="topbar-tab" aria-pressed={universe === "street"} onClick={() => selectUniverse("street")}>Street</button>
         </nav>
         <div className="operator-block">
           <button type="button" className="operator-name" onClick={() => setAccountOpen(true)} aria-label={`Open account: ${user.username}`} aria-haspopup="dialog">
@@ -1081,8 +1114,6 @@ export default function MarvelNexus({ request = browserApiRequest }: { request?:
           <button className="icon-button" onClick={logout} aria-label="Log out"><LogOut size={17} /></button>
         </div>
       </header>
-
-      <DeveloperCarousel placement="dashboard" />
 
       <section className="mission-stage">
         <div className="mission-stage-backdrop"><Image src={backdropUrl(activeHero)} alt="" fill priority sizes="100vw" /><div /></div>
@@ -1101,7 +1132,7 @@ export default function MarvelNexus({ request = browserApiRequest }: { request?:
         <section className="progress-overview global-status-row">
           <div className="status-primary doomsday-progress glass-panel">
             <ProgressReactor value={doomsdayStats.percent} tone="global" />
-            <div className="status-copy"><div className="status-label"><p className="eyebrow">UNIVERSAL DOOMSDAY READINESS</p><span>GLOBAL</span></div><h2>{doomsdayComplete ? "Doomsday protocol complete" : "Mission in progress"}</h2><p>{doomsdayStats.movies} movies + {doomsdayStats.specials} specials + {doomsdayStats.totalEpisodes} episodes · required checkpoints</p><CheckpointCounts watched={doomsdayStats.watchedUnits} total={doomsdayStats.totalUnits} /></div>
+            <div className="status-copy"><div className="status-label"><p className="eyebrow">UNIVERSAL DOOMSDAY READINESS</p><span>GLOBAL</span></div><h2>{doomsdayComplete ? "Doomsday protocol complete" : "Mission in progress"}</h2><p>{checkpointBreakdown(doomsdayStats)} · required checkpoints</p><CheckpointCounts watched={doomsdayStats.watchedUnits} total={doomsdayStats.totalUnits} /></div>
           </div>
           <div className="metric-card runtime-card doomsday-runtime glass-panel"><Clock3 size={22} /><div><span className="scope-pill">GLOBAL</span><small>DOOMSDAY WATCH TIME LEFT</small><strong>{formatDuration(doomsdayStats.remainingRuntime)}</strong><em>MCU + X-MEN REQUIRED ONLY{doomsdayStats.pendingRuntime ? " · PLUS UNRELEASED RUNTIME" : ""}</em>
             <PacePlanner remainingSeconds={doomsdayStats.remainingRuntime} daysLeft={daysUntilDoomsday} complete={doomsdayComplete} />
@@ -1118,7 +1149,7 @@ export default function MarvelNexus({ request = browserApiRequest }: { request?:
         <section className="status-deck metric-deck local-status-row">
           <div className="status-primary track-status glass-panel">
             <ProgressReactor value={trackStats.percent} tone="local" />
-            <div className="status-copy"><p className="eyebrow">CURRENT TAB ARCHIVE</p><h2>{universe === "mcu" ? "MCU completion" : universe === "xmen" ? "X-Men completion" : "Street Saga completion"}</h2><p>{trackStats.movies} movies + {trackStats.specials} specials + {trackStats.totalEpisodes} episodes • optional included</p><CheckpointCounts watched={trackStats.watchedUnits} total={trackStats.totalUnits} /></div>
+            <div className="status-copy"><p className="eyebrow">CURRENT TAB ARCHIVE</p><h2>{universe === "mcu" ? "MCU completion" : universe === "xmen" ? "X-Men completion" : "Street Saga completion"}</h2><p>{checkpointBreakdown(trackStats)} • optional included</p><CheckpointCounts watched={trackStats.watchedUnits} total={trackStats.totalUnits} /></div>
           </div>
           <div className="counter-grid glass-panel">
             <div className="counter-cell"><Film size={18} /><div><small>MOVIES</small><strong>{trackStats.watchedMovies}<span> / {trackStats.movies}</span></strong></div></div>
@@ -1148,13 +1179,13 @@ export default function MarvelNexus({ request = browserApiRequest }: { request?:
           <div className="archive-tools">
             <label className="search-field"><Search size={16} /><span className="sr-only">Search this archive</span><input ref={searchInputRef} value={searchQuery} onChange={(event) => setSearchQuery(event.target.value)} placeholder="Search this archive" /></label>
             <div className="filter-groups">
-              <div className="filter-group"><span>Mission</span><div className="filter-row" aria-label="Filter by Doomsday necessity">
+              <div className="filter-group"><span>Mission</span><div className="filter-row" role="group" aria-label="Filter by Doomsday necessity">
                 {([['all', 'All'], ['doomsday', 'Necessary for Doomsday'], ['optional', 'Optional']] as [RequirementFilter, string][]).map(([value, label]) => <button key={value} aria-pressed={requirementFilter === value} disabled={universe === "street" && value === "doomsday"} title={universe === "street" && value === "doomsday" ? "Street-Level entries do not count toward Doomsday readiness" : undefined} className={requirementFilter === value ? "active" : ""} onClick={() => setRequirementFilter(value)}>{label}</button>)}
               </div></div>
-              <div className="filter-group"><span>Format</span><div className="filter-row" aria-label="Filter by format">
+              <div className="filter-group"><span>Format</span><div className="filter-row" role="group" aria-label="Filter by format">
                 {([['all', 'All'], ['movie', 'Movies'], ['series', 'TV shows'], ['special', 'Specials']] as [FormatFilter, string][]).map(([value, label]) => <button key={value} aria-pressed={formatFilter === value} className={formatFilter === value ? "active" : ""} onClick={() => setFormatFilter(value)}>{label}</button>)}
               </div></div>
-              <div className="filter-group"><span>Progress</span><div className="filter-row progress-filter" aria-label="Filter by viewing progress">
+              <div className="filter-group"><span>Progress</span><div className="filter-row progress-filter" role="group" aria-label="Filter by viewing progress">
                 <button aria-pressed={unwatchedOnly} className={unwatchedOnly ? "active" : ""} onClick={() => setUnwatchedOnly((current) => !current)}>Unwatched</button>
               </div></div>
             </div>
@@ -1184,7 +1215,7 @@ export default function MarvelNexus({ request = browserApiRequest }: { request?:
         </section>
       </section>
 
-      <footer><div className="brand-lockup compact"><div className="brand-mark"><span>D</span></div><div><strong>DOOM FLIX</strong><small>WATCH PROTOCOL</small></div></div><p>Personal viewing archive • Release-order spoiler protection active</p><span><Database size={14} /> {CONTENT.length} transmissions indexed</span></footer>
+      <footer><div className="brand-lockup compact"><div className="brand-mark"><span>D</span></div><div><strong>DOOM FLIX</strong><small>WATCH PROTOCOL</small></div></div><p>Personal viewing archive • Release-order spoiler protection active • Developed by Abdul Rehman Shahid</p><span><Database size={14} /> {CONTENT.length} transmissions indexed</span></footer>
 
       {selected && <DetailDrawer key={selected.id} item={selected} viewing={viewing} now={now} outOfOrder={outOfOrder.has(selected.id)} busyKey={busyKey} onClose={() => setSelected(null)} onOpenPrerequisite={openArchiveItem} onToggle={toggle} watchUrl={watchCatalogue.links.get(normalizeWatchTitle(selected.title))} watchLinksLoaded={watchCatalogue.loaded} />}
       {loreOpen && (

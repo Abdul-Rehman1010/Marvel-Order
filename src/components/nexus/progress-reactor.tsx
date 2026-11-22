@@ -56,7 +56,6 @@ export function ProgressReactor({ value, tone = "global" }: { value: number; ton
       </svg>
       <div className="reactor-readout">
         <strong>{displayValue}%</strong>
-        <span>SYNCED</span>
       </div>
     </div>
   );

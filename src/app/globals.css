@@ -65,10 +65,6 @@ button:focus-visible, input:focus-visible, [tabindex]:focus-visible { outline: 2
 .topbar nav { display: flex; align-items: stretch; align-self: stretch; }
 .topbar nav button { min-width: 132px; border: 0; border-bottom: 2px solid transparent; background: transparent; color: var(--muted); display: flex; align-items: center; justify-content: center; gap: 8px; cursor: pointer; font-weight: 650; font-size: 13px; transition: .2s ease; }
 .topbar nav button:hover { color: var(--text); background: rgb(255 255 255 / 3%); }
-.topbar nav .nav-active { color: var(--accent); border-color: var(--accent); }
-.topbar-divider { width: 1px; height: 20px; align-self: center; margin: 0 2px; background: var(--border); }
-.topbar nav .topbar-tab { min-width: 0; padding: 0 13px; gap: 6px; }
-.topbar nav .topbar-tab[aria-pressed="true"] { color: var(--accent); border-color: var(--accent); }
 
 .jump-pill { position: fixed; left: 50%; bottom: 26px; z-index: 40; padding: 10px 17px; display: flex; align-items: center; gap: 8px; border: 1px solid var(--accent); border-radius: 99px; background: var(--raised); color: var(--text); cursor: pointer; font: 700 12px/1 var(--display); box-shadow: 0 14px 34px rgb(0 0 0 / 38%); transform: translateX(-50%); animation: jump-pill-in var(--dur-med) var(--ease-out-expo) both; }
 .jump-pill:hover { background: var(--hover); }
@@ -97,7 +93,6 @@ button:focus-visible, input:focus-visible, [tabindex]:focus-visible { outline: 2
 .install-steps svg { vertical-align: -2px; color: var(--global); }
 
 .developer-carousel { min-height: 54px; position: relative; z-index: 10; display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 12px; overflow: hidden; border-bottom: 1px solid rgb(42 66 49 / 70%); background: linear-gradient(90deg, rgb(70 224 124 / 10%), rgb(13 21 16 / 94%) 40%, rgb(168 255 96 / 6%)); }
-.developer-carousel.dashboard { padding: 9px clamp(18px, 4vw, 64px); }
 .carousel-signal { width: 30px; height: 30px; display: grid; place-items: center; border: 1px solid rgb(168 255 96 / 38%); border-radius: 50%; color: var(--global); background: rgb(168 255 96 / 7%); box-shadow: 0 0 18px rgb(168 255 96 / 8%); }
 .carousel-message { min-width: 0; display: grid; gap: 2px; animation: carousel-reveal .38s ease both; }
 .carousel-message span { color: var(--muted); font: 700 9px/1.2 var(--display); letter-spacing: .13em; }
@@ -168,7 +163,6 @@ button:focus-visible, input:focus-visible, [tabindex]:focus-visible { outline: 2
 .progress-reactor.local .reactor-ticks line.lit { stroke: color-mix(in srgb, var(--accent) 65%, white); }
 .reactor-readout { position: absolute; inset: 15px; display: grid; place-content: center; text-align: center; border-radius: 50%; background: var(--base); box-shadow: inset 0 0 0 1px rgb(255 255 255 / 4%); }
 .reactor-readout strong { font: 750 25px/1 var(--display); font-variant-numeric: tabular-nums; }
-.reactor-readout span { margin-top: 5px; color: var(--muted); font: 700 9px/1 var(--display); letter-spacing: .1em; }
 .status-copy { min-width: 0; flex: 1; }
 .status-label { display: flex; justify-content: space-between; gap: 12px; align-items: center; }
 .status-label > span, .scope-pill { padding: 4px 8px; border: 1px solid rgb(168 255 96 / 48%); border-radius: 99px; color: var(--global); background: rgb(168 255 96 / 10%); font: 750 10px/1 var(--display); letter-spacing: .08em; }
@@ -177,9 +171,10 @@ button:focus-visible, input:focus-visible, [tabindex]:focus-visible { outline: 2
 .checkpoint-counts { margin: 13px 0 0; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); overflow: hidden; border: 1px solid var(--border); border-radius: 10px; background: rgb(5 10 8 / 38%); }
 .checkpoint-counts > div { min-width: 0; padding: 8px 11px; display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 .checkpoint-counts > div + div { border-left: 1px solid var(--border); }
-.checkpoint-counts dt { min-width: 0; display: flex; align-items: center; gap: 6px; color: var(--muted); font: 700 10px/1 var(--display); letter-spacing: .06em; text-transform: uppercase; }
+.checkpoint-counts dt { min-width: 0; overflow: hidden; display: flex; align-items: center; gap: 6px; color: var(--muted); font: 700 10px/1 var(--display); letter-spacing: .06em; text-transform: uppercase; }
 .checkpoint-counts dt svg { flex: 0 0 auto; }
-.checkpoint-counts dd { margin: 0; color: var(--text); font: 750 18px/1 var(--display); font-variant-numeric: tabular-nums; }
+.checkpoint-counts dt span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.checkpoint-counts dd { flex: 0 0 auto; margin: 0; color: var(--text); font: 750 18px/1 var(--display); font-variant-numeric: tabular-nums; }
 .checkpoint-counts .watched-count dt, .checkpoint-counts .watched-count dd { color: var(--complete); }
 .metric-card { min-width: 0; padding: 20px; display: flex; align-items: center; gap: 15px; border-radius: 15px; }
 .metric-card > svg { color: var(--muted); flex: 0 0 auto; }
@@ -298,7 +293,6 @@ button:focus-visible, input:focus-visible, [tabindex]:focus-visible { outline: 2
 .card-summary { margin: 8px 0 11px; display: -webkit-box; overflow: hidden; color: var(--secondary); font-size: 13px; line-height: 1.45; -webkit-line-clamp: 3; -webkit-box-orient: vertical; }
 .card-availability { width: 100%; min-height: 40px; margin: 0 0 10px; padding: 7px 9px; display: flex; align-items: center; justify-content: space-between; gap: 8px; border: 1px solid; border-radius: 8px; font-size: 12px; }
 .card-availability > span { display: inline-flex; align-items: center; gap: 6px; flex: 0 0 auto; font-weight: 700; }
-.card-availability.ready { border-color: rgb(101 214 163 / 28%); background: rgb(101 214 163 / 7%); color: var(--complete); }
 .card-availability.locked { border-color: rgb(255 125 137 / 28%); background: rgb(255 125 137 / 7%); color: var(--error); }
 .card-availability button { min-width: 0; max-width: 68%; padding: 3px 0; display: flex; align-items: center; gap: 2px; border: 0; background: transparent; color: var(--secondary); cursor: pointer; font: 700 11px/1.2 var(--display); }
 .card-availability button span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -455,6 +449,9 @@ button.viewing-path-row:hover { border-color: var(--global); background: var(--h
 .episode-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; }
 .episode-runtime { color: var(--muted); font: 650 11px/1 var(--display); font-variant-numeric: tabular-nums; }
 .drawer-action { width: 100%; min-height: 44px; margin: 0; }
+.drawer-go { justify-content: space-between; text-align: left; }
+.drawer-go span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.drawer-release-note { min-height: 44px; margin: 0; padding: 0 12px; display: flex; align-items: center; justify-content: center; gap: 8px; border: 1px solid rgb(118 147 190 / 38%); border-radius: 10px; background: var(--base); color: var(--secondary); font: 650 13px/1.2 var(--display); }
 
 .toast { max-width: min(390px, calc(100vw - 32px)); position: fixed; right: 24px; bottom: 24px; z-index: 100; padding: 13px 15px; display: flex; align-items: center; gap: 9px; border: 1px solid rgb(255 125 137 / 42%); border-radius: 10px; background: #24171d; color: var(--text); box-shadow: var(--shadow); font-size: 13px; }
 
@@ -594,6 +591,8 @@ footer > span { display: flex; align-items: center; gap: 6px; }
 /* Narrow phones: the account button (1.5) made the top bar one button longer, so the Lore
    button shows its icon only and the brand keeps to one line. It keeps its accessible name. */
 @media (max-width: 430px) {
+  .checkpoint-counts dt svg { display: none; }
+  .checkpoint-counts > div { padding-right: 9px; padding-left: 9px; }
   .mobile-lore-action { width: 44px; padding: 0; justify-content: center; }
   .mobile-lore-action span { display: none; }
   .mission-hero { height: auto; min-height: 0; }
@@ -630,7 +629,6 @@ footer > span { display: flex; align-items: center; gap: 6px; }
   .confirmation-dialog { max-height: calc(100vh - 32px); max-height: calc(100dvh - 32px); overflow-y: auto; overscroll-behavior: contain; }
   .primary-action, .secondary-action, .danger-action { min-height: 44px; }
   .auth-shell { display: block; }
-  .developer-carousel.dashboard { padding-right: max(14px, env(safe-area-inset-right)); padding-left: max(14px, env(safe-area-inset-left)); }
   .auth-intro { min-width: 0; min-height: 42svh; padding: calc(26px + env(safe-area-inset-top)) max(22px, env(safe-area-inset-right)) 26px max(22px, env(safe-area-inset-left)); border: 0; border-bottom: 1px solid var(--border); }
   .auth-copy { width: 100%; max-width: 100%; }
   .auth-copy h1, .auth-copy h1 em { max-width: 100%; overflow-wrap: anywhere; }
@@ -673,7 +671,6 @@ footer > span { display: flex; align-items: center; gap: 6px; }
   .progress-reactor, .track-status .progress-reactor { width: 78px; height: 78px; }
   .reactor-readout { inset: 11px; }
   .reactor-readout strong { font-size: 20px; }
-  .reactor-readout span { font-size: 8px; }
   .status-copy h2 { font-size: 19px; }
   .status-copy > p { font-size: 12.5px; line-height: 1.5; }
   .track-status { align-items: flex-start; }
@@ -737,7 +734,6 @@ footer > span { display: flex; align-items: center; gap: 6px; }
   .auth-intro { min-height: 0; padding: calc(24px + env(safe-area-inset-top)) max(18px, env(safe-area-inset-right)) 24px max(18px, env(safe-area-inset-left)); }
   .auth-start { gap: 17px; }
   .developer-carousel.auth { min-height: 54px; }
-  .developer-carousel.dashboard { min-height: 58px; padding-right: max(12px, env(safe-area-inset-right)); padding-left: max(12px, env(safe-area-inset-left)); }
   .carousel-message strong { overflow: visible; font-size: 12px; line-height: 1.25; text-overflow: clip; white-space: normal; }
   .auth-copy { margin: 34px 0 18px; }
   .auth-copy h1 { margin: 12px 0 14px; font-size: clamp(38px, 12vw, 52px); }

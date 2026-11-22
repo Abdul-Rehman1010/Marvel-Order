@@ -1,12 +1,12 @@
-# Known gaps after packages 0.1–0.6 and 1.2–1.5
+# Known gaps after packages 0.1–0.6 and 1.2–1.6
 
-Written 2026-11-17, last updated 2026-11-22 (after 1.5), from what was found while implementing `NEXT_LEVEL_PLAN.md`. Nothing here has been fixed by this file; it is a list. Each item says **what is wrong**, **how it was found**, **what it affects** and **where it is meant to be dealt with** (a plan package, an owner step, or nobody yet).
+Written 2026-11-17, last updated 2026-11-22 (after 1.6), from what was found while implementing `NEXT_LEVEL_PLAN.md`. Nothing here has been fixed by this file; it is a list. Each item says **what is wrong**, **how it was found**, **what it affects** and **where it is meant to be dealt with** (a plan package, an owner step, or nobody yet).
 
 Severity: **High** = could lose or hide user data, or break the live site. **Medium** = wrong or fragile behaviour that a user or a deploy could hit. **Low** = untidy, informational, or already scheduled.
 
-Status of the work itself: 0.1–0.6 and 1.2–1.4 are committed locally (**not pushed**). 1.5 is finished but **not committed**. Vercel is still serving the commit before all of it.
+Status of the work itself: 0.1–0.6 and 1.2–1.5 are committed locally (**not pushed**; the branch is 6 commits ahead of `origin/master`). 1.6 is finished but **not committed**. Vercel is still serving the commit before all of it.
 
-Solved gaps are removed rather than marked, so numbers can skip (B3 and the old F2 were solved by 1.4, F5 by 1.5).
+Solved gaps are removed rather than marked, so numbers can skip (B3 and the old F2 were solved by 1.4, F5 by 1.5, C6 and C7 by 1.6).
 
 ---
 
@@ -47,13 +47,12 @@ Solved gaps are removed rather than marked, so numbers can skip (B3 and the old 
 | C3 | **MCU counts changed on screen.** | Low | The unpublished series *Your Friendly Neighborhood Spider-Man S2* no longer counts, so the MCU tab shows 139 episodes / 20 seasons (was 149 / 21) and can reach 100%. Intended by the plan, but visible. | Informational. |
 | C4 | **Out-of-order rows left by the old bugs still exist in any real account that hit them.** | Medium | They are reported (`outOfOrder`) and labelled "Watched out of order", and can be removed one at a time. There is no bulk "fix my progress" action, and nothing tells the user on the dashboard that such rows exist. | A notice or a one-tap clean-up would be new work; not planned. |
 | C5 | **An unpublished series is not drawn as locked.** | Low | The server refuses it (`pending`), as the plan requires, but on screen it keeps its old look (episode rows disabled, "metadata pending"). The client, command palette and shelf all hide the `pending` lock on purpose, so the characterisation snapshots stay byte-identical. | Decide in 2.x whether to show "Pending" explicitly. |
-| C6 | **Phone label collision "REMAINING93".** | Low | Visible in the 390 px screenshot (label runs into the number). | **Package 1.6**. |
-| C7 | **"Ready to watch" shows on watched cards; the "+ 0 specials" and "SYNCED" captions; inert top-bar buttons.** | Low | Visible in the screenshots. | **Package 1.6**. |
-| C8 | **Text under 11 px.** | Low | 29 / 29 / 35 visible text nodes at the three sizes. The plan quoted 24; that count is not reproducible with the rule used. Compare future runs against these numbers. | **Package 2.8**. |
-| C9 | **Tests depend on the current markup.** | Low | The browser specs use `#timeline-item-<id>`, `.card-visual`, `.timeline-card`, `.recovery-code`, `.auth-panel .form-error`, and button and dialog names (including "Open account: <username>"). Changing the markup (2.4–2.7) will break them until updated. | Update with those packages. |
+| C8 | **Text under 11 px.** | Low | 26 / 26 / 32 visible text nodes at the three sizes after 1.6 (29 / 29 / 35 before it). The plan quoted 24; that count is not reproducible with the rule used. Compare future runs against these numbers. | **Package 2.8**. |
+| C9 | **Tests depend on the current markup.** | Low | The browser specs use `#timeline-item-<id>`, `.card-visual`, `.timeline-card`, `.recovery-code`, `.auth-panel .form-error`, and button and dialog names (including "Open account: <username>"), `.drawer-go` and `.drawer-release-note`. Changing the markup (2.4–2.7) will break them until updated. | Update with those packages. |
 | C10 | **Accounts created before 1.5 have no recovery code, and the only prompt is a small dot.** | Medium | Every account created before 1.5 (the copy of your local database checked on 2026-11-15 had 71) has no code until its owner opens the account panel and makes one. Until then a forgotten password means a lost account. The app shows only a gold dot on the account button, which is easy to miss. | Not planned. A one-time banner or a prompt after sign-in would be new work. |
 | C11 | **The recovery code is lost if the tab is closed before "Continue".** | Low | Sign-up creates the account and signs it in before the code dialog appears. Closing or reloading the tab at that point enters the app without the code having been saved. A new code can be made from the panel with the password. | Not planned. |
-| C12 | **On phones narrower than 430 px the Lore button is icon-only.** | Low | Added in 1.5 so the new account button fits without the brand wrapping onto two lines. It keeps its accessible name. | The top bar is redesigned in **2.6**. |
+| C12 | **On phones narrower than 430 px the Lore button is icon-only (and, since 1.6, the small icons in the Watched / Remaining boxes are hidden).** | Low | Added in 1.5 so the new account button fits without the brand wrapping onto two lines. It keeps its accessible name. | The top bar is redesigned in **2.6**. |
+| C13 | **The desktop top bar is sparse.** | Low | 1.6 removed the inert Timeline and universe buttons, so the middle of the bar holds only "Lore brief". The universe switch lower on the page and keys 1/2/3 are the only ways to change universe. | The top bar is redesigned in **2.6**. |
 
 ---
 

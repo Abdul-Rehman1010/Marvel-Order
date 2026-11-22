@@ -373,7 +373,7 @@ Titles in `code` are catalogue ids. "Full account" means every released unit wat
 - Remove "+ 0 specials" (omit zero-count parts), the "SYNCED" caption under both progress rings, and the top bar's inert "Timeline" button and three universe buttons (the universe switch below and keys 1/2/3 remain).
 - Developer credit: remove `<DeveloperCarousel placement="dashboard" />`; add "Developed by Abdul Rehman Shahid" to the footer. On the sign-in screen keep the carousel but drop `aria-live`, pause rotation on hover/focus and under reduced motion (today a screen reader hears it every 4.6 s).
 - Filter groups get `role="group"`.
-- [ ] Acceptance: screenshots at all three sizes; first-card offset drops by at least the 54 px credit band.
+- [x] Acceptance: screenshots at all three sizes; first-card offset drops by at least the 54 px credit band. *(Done 2026-11-22: first card 1,379 → 1,325 px at 1440 and 1366 (exactly 54) and 2,242 → 2,184 px at 390 (58); all three sizes were looked at. See the 1.6 record.)*
 
 ### M2 — Fast start, fast flow
 
@@ -653,7 +653,7 @@ Each package appends here when it is done: what changed, anything that differs f
 
 **Observed, not acted on.** `npm audit` reports 10 findings, all in packages that were already installed (none come from the test tooling): `next` 16.3.5 (critical: remote code execution in `next/og` `ImageResponse`; the audit lists 16.4.6 as a non-major fix), `zod` and `sharp` (high), and the typescript-eslint and minimatch chain (moderate). The app uses `ImageResponse` for its icons and 3.5 plans to use it for the share card. Updating `next` is a decision for the owner; the `AGENTS.md` warning about breaking changes applies.
 
-### M1 — Correct and safe (in progress: 1.2 done on 2026-11-16, 1.3 on 2026-11-17, 1.4 and 1.5 on 2026-11-22; 1.6 not started)
+### M1 — Correct and safe (in progress: 1.2 done on 2026-11-16, 1.3 on 2026-11-17, 1.4, 1.5 and 1.6 on 2026-11-22; M1 complete)
 
 **1.2 Catalogue and graph** (Opus, 2026-11-16).
 - **Catalogue split.** `src/lib/content.ts` was split by script, so the data was moved, not retyped: `src/lib/catalogue/types.ts`, `mcu.ts`, `xmen.ts`, `street.ts`, `index.ts`, plus two files the §4.2 layout does not list: `build.ts` (the `movie` / `series` / `special` / `episodes` builders the universe files share) and `summaries.ts` (`MOVIE_SUMMARIES`, still applied in `index.ts` exactly as before). `ContentItem` gained `requires?: string[]` and `alsoRequires?: string[]`. Files in `catalogue/` import each other relatively, because `scripts/catalogue-check.mjs` loads the catalogue without the `@/` alias (it still reports the same 12 titles).
@@ -860,3 +860,26 @@ Each package appends here when it is done: what changed, anything that differs f
 - lint: 0 errors (same one warning); typecheck: clean; `npm test`: 226 passed, three runs in a row; `npm run build`: OK, with the five new routes.
 - `npx playwright test`: 15 passed on the dev server and 15 on a production build (production CSP), with no CSP violations and layout numbers unchanged (1,379 / 1,379 / 2,242 px). Smoke spec with `CI=true`: passed.
 - `marvel-vault.db` and `public/watch-links.csv` untouched.
+
+**1.6 Quick visual and accessibility fixes** (Sonnet, 2026-11-22).
+
+*What changed* (all in `src/components/marvel-nexus.tsx`, `src/components/nexus/progress-reactor.tsx` and `src/app/globals.css`).
+- **"REMAINING93" collision.** The labels are wrapped in a `<span>` that truncates with an ellipsis, and the number cannot shrink (`flex: 0 0 auto` on `dd`). The plan put the truncation on `dt`; on a flex container text never gets an ellipsis, hence the inner span. Below 430 px the small icons are hidden and the cell padding is trimmed, so at 390 px the full words "WATCHED" and "REMAINING" fit and the ellipsis is only a safety net (for example a three-digit count).
+- **Cards.** `.card-availability` renders only for locked titles (including "Watched out of order"). Its `ready` style is gone.
+- **Locked drawer.** A locked, unwatched title shows a primary button "Go to {prerequisite}" that calls `onOpenPrerequisite`, for a scheduled title the text "Releases {date}" with no button. This also applies to a locked series, which had no action before. A watched title that is locked (left by the old bugs) keeps "Remove watched status".
+- **Zero parts omitted.** "{movies} movies + {specials} specials + {episodes} episodes" is built by `checkpointBreakdown`, which drops any part that is 0 (the MCU line used to read "+ 0 specials" for X-Men and Street). The SPECIALS counter cell is unchanged.
+- **Removed:** the "SYNCED" caption under both rings, and the top bar's inert "Timeline" button and three universe buttons with their divider (the universe switch below and keys 1/2/3 remain; the Lore brief button stays).
+- **Developer credit.** The dashboard carousel is gone and the footer reads "… • Developed by Abdul Rehman Shahid". On the sign-in screen the carousel has no `aria-live`, stops while hovered or while focus is inside it, and does not rotate under reduced motion (the dots still switch slides).
+- **Filter groups** have `role="group"` (they already had names).
+- Dead CSS for the removed pieces was deleted.
+
+*Tests.* New `tests/e2e/polish.spec.ts` (6 tests × 3 sizes): no "Ready to watch" or availability strip on a watched card, locked cards keep theirs; no "SYNCED", no "0 specials", no top-bar Timeline or universe buttons, and the universe switch and key "1" still work; footer credit and no dashboard carousel; three named filter groups; labels end before their numbers and the cells do not scroll sideways; "Go to" opens the prerequisite's drawer and no "Complete prerequisite" button remains; a scheduled title (clock fixed at 1 Oct 2026, everything before VisionQuest watched through one `bulk` request) shows "Releases Oct 14, 2026" and no action button; the sign-in carousel has no live region and holds still on hover, on focus, and under reduced motion (fake clock).
+
+*Decisions beyond the text above.*
+1. The label fix needed the span and the phone icon hiding described above; truncating `dt` alone would have left "WATCH…" and "REMAI…" on a phone.
+2. "Go to" is also offered for a locked series, since a locked series drawer had no action at all.
+
+**Verification after 1.6, 2026-11-22** (scratch databases only):
+- lint: 0 errors (same one warning); typecheck: clean; `npm test`: 226 passed; `npm run build`: OK; `npx playwright test`: 33 passed on the dev server (not repeated on a production build; nothing here touches headers or scripts, and the dashboard test checks for CSP violations).
+- Layout at 1440 / 1366 / 390: first card top 1,325 / 1,325 / 2,184 px (was 1,379 / 1,379 / 2,242); page height 12,585 / 12,607 / 24,024 px; text under 11 px 26 / 26 / 32 nodes (was 29 / 29 / 35); no horizontal overflow. Compare later runs with these numbers.
+- `marvel-vault.db`, `public/watch-links.csv` and `src/lib/watch-links.ts` untouched.
