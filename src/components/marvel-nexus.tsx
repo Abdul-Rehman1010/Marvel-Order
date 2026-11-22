@@ -72,6 +72,8 @@ import { MultiverseShelf } from "@/components/nexus/multiverse-shelf";
 import { AuthPosterWall } from "@/components/nexus/auth-poster-wall";
 import { LoreExperience } from "@/components/nexus/lore-experience";
 import { InstallAppButton } from "@/components/nexus/install-app";
+import { AccountPanel } from "@/components/nexus/account-panel";
+import { RecoveryCodeDialog } from "@/components/nexus/recovery-code-dialog";
 
 type User = { id: string; username: string };
 type RequirementFilter = "all" | "doomsday" | "optional";
@@ -186,26 +188,45 @@ function DeveloperCarousel({ placement }: { placement: "auth" | "dashboard" }) {
   );
 }
 
-function AuthScreen({ onAuthenticated, request }: { onAuthenticated: (isNewAccount: boolean) => void; request: NexusApiRequest }) {
-  const [mode, setMode] = useState<"signup" | "login">("login");
+type AuthMode = "signup" | "login" | "recover";
+
+function AuthScreen({ onAuthenticated, request, initialNotice = "" }: { onAuthenticated: (isNewAccount: boolean) => void; request: NexusApiRequest; initialNotice?: string }) {
+  const [mode, setMode] = useState<AuthMode>("login");
   const [error, setError] = useState("");
+  const [notice, setNotice] = useState(initialNotice);
   const [busy, setBusy] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
+  // A recovery code to show once (after sign-up or a reset) before entering the app.
+  const [issued, setIssued] = useState<{ code: string; username: string; isNewAccount: boolean } | null>(null);
+
+  function switchMode(next: AuthMode) {
+    setMode(next);
+    setError("");
+    setNotice("");
+  }
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setBusy(true);
     setError("");
+    setNotice("");
     const form = new FormData(event.currentTarget);
+    const body = mode === "recover"
+      ? { username: form.get("username"), recoveryCode: form.get("recoveryCode"), newPassword: form.get("password") }
+      : { username: form.get("username"), password: form.get("password") };
     try {
       const response = await request(`/api/auth/${mode}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ username: form.get("username"), password: form.get("password") }),
+        body: JSON.stringify(body),
       });
       const payload = await response.json();
       if (!response.ok) {
         setError(payload.error ?? "Unable to open the archive.");
+        return;
+      }
+      if (typeof payload.recoveryCode === "string") {
+        setIssued({ code: payload.recoveryCode, username: payload.user?.username ?? String(form.get("username")), isNewAccount: mode === "signup" });
         return;
       }
       onAuthenticated(mode === "signup");
@@ -215,6 +236,13 @@ function AuthScreen({ onAuthenticated, request }: { onAuthenticated: (isNewAccou
       setBusy(false);
     }
   }
+
+  const heading = mode === "signup" ? "Create your archive" : mode === "recover" ? "Reset your password" : "Resume your mission";
+  const intro = mode === "signup"
+    ? "One local profile. No email or external identity required."
+    : mode === "recover"
+      ? "Enter your username, the recovery code you saved, and a new password."
+      : "Enter your stored operator credentials.";
 
   return (
     <main className="auth-shell">
@@ -246,31 +274,50 @@ function AuthScreen({ onAuthenticated, request }: { onAuthenticated: (isNewAccou
         <div className="auth-panel glass-panel">
           <div className="panel-corners" />
           <p className="eyebrow"><Fingerprint size={15} /> OPERATOR IDENTIFICATION</p>
-          <h2>{mode === "signup" ? "Create your archive" : "Resume your mission"}</h2>
-          <p className="muted">{mode === "signup" ? "One local profile. No email or external identity required." : "Enter your stored operator credentials."}</p>
-          <div className="auth-switch">
-            <span className={`auth-switch-track ${mode}`} aria-hidden="true" />
-            <button type="button" className={mode === "login" ? "active" : ""} onClick={() => { setMode("login"); setError(""); }}>Sign in</button>
-            <button type="button" className={mode === "signup" ? "active" : ""} onClick={() => { setMode("signup"); setError(""); }}>Create account</button>
-          </div>
-          <form onSubmit={submit}>
+          <h2>{heading}</h2>
+          <p className="muted">{intro}</p>
+          {mode !== "recover" && (
+            <div className="auth-switch">
+              <span className={`auth-switch-track ${mode}`} aria-hidden="true" />
+              <button type="button" className={mode === "login" ? "active" : ""} onClick={() => switchMode("login")}>Sign in</button>
+              <button type="button" className={mode === "signup" ? "active" : ""} onClick={() => switchMode("signup")}>Create account</button>
+            </div>
+          )}
+          {notice && <div className="auth-notice" role="status"><Check size={14} /> {notice}</div>}
+          <form key={mode} onSubmit={submit}>
             <label>Operator name<input name="username" autoComplete="username" placeholder="e.g. watcher_616" required minLength={3} maxLength={24} /></label>
-            <label>Access key<span className="password-field"><input name="password" type={showPassword ? "text" : "password"} autoComplete={mode === "signup" ? "new-password" : "current-password"} placeholder="Enter password" required minLength={mode === "signup" ? 8 : 1} maxLength={72} /><button type="button" onClick={() => setShowPassword((value) => !value)} aria-label={showPassword ? "Hide password" : "Show password"}>{showPassword ? <EyeOff size={17} /> : <Eye size={17} />}</button></span></label>
-            {error && <div className="form-error"><Zap size={14} /> {error}</div>}
+            {mode === "recover" && (
+              <label>Recovery code<input name="recoveryCode" autoComplete="off" autoCapitalize="characters" spellCheck={false} placeholder="XXXXX-XXXXX-XXXXX-XXXXX" required maxLength={40} /></label>
+            )}
+            <label>{mode === "recover" ? "New password" : "Access key"}<span className="password-field"><input name="password" type={showPassword ? "text" : "password"} autoComplete={mode === "login" ? "current-password" : "new-password"} placeholder={mode === "login" ? "Enter password" : "8 to 72 characters"} required minLength={mode === "login" ? 1 : 8} maxLength={72} /><button type="button" onClick={() => setShowPassword((value) => !value)} aria-label={showPassword ? "Hide password" : "Show password"}>{showPassword ? <EyeOff size={17} /> : <Eye size={17} />}</button></span></label>
+            {error && <div className="form-error" role="alert"><Zap size={14} /> {error}</div>}
             <button className="primary-action" disabled={busy} type="submit">
-              {busy ? "Establishing link…" : mode === "signup" ? "Initialize profile" : "Enter Doom Flix"}
+              {busy ? "Establishing link…" : mode === "signup" ? "Initialize profile" : mode === "recover" ? "Reset password" : "Enter Doom Flix"}
               {!busy && <ArrowRight size={17} />}
             </button>
           </form>
+          {mode === "login" && (
+            <p className="auth-mode-link">
+              <button type="button" onClick={() => switchMode("recover")}>Forgot password?</button>
+            </p>
+          )}
           <p className="auth-mode-link">
-            {mode === "login" ? "New to Doom Flix?" : "Already have an account?"}
-            <button type="button" onClick={() => { setMode(mode === "login" ? "signup" : "login"); setError(""); }}>
+            {mode === "login" ? "New to Doom Flix?" : mode === "recover" ? "Remembered it?" : "Already have an account?"}
+            <button type="button" onClick={() => switchMode(mode === "login" ? "signup" : "login")}>
               {mode === "login" ? "Create an account" : "Sign in"}
             </button>
           </p>
           <div className="security-note"><ShieldCheck size={15} /><span>Password protected. Progress stored in the local timeline vault.</span></div>
         </div>
       </section>
+      {issued && (
+        <RecoveryCodeDialog
+          code={issued.code}
+          username={issued.username}
+          heading={issued.isNewAccount ? "Save your recovery code" : "Password changed. Save your new recovery code"}
+          onDone={() => onAuthenticated(issued.isNewAccount)}
+        />
+      )}
     </main>
   );
 }
@@ -696,6 +743,10 @@ export default function MarvelNexus({ request = browserApiRequest }: { request?:
   const [searchQuery, setSearchQuery] = useState("");
   const [selected, setSelected] = useState<ContentItem | null>(null);
   const [loreOpen, setLoreOpen] = useState(false);
+  const [accountOpen, setAccountOpen] = useState(false);
+  const [hasRecoveryCode, setHasRecoveryCode] = useState(true);
+  // Shown on the sign-in screen after the account panel signs this device out.
+  const [signedOutNotice, setSignedOutNotice] = useState("");
   const [busyKey, setBusyKey] = useState<string | null>(null);
   const [notice, setNotice] = useState("");
   const [delightToasts, setDelightToasts] = useState<DelightToast[]>([]);
@@ -724,6 +775,7 @@ export default function MarvelNexus({ request = browserApiRequest }: { request?:
       setUser(payload.user);
       setViewingState(readState(payload));
       setDatabaseMode(payload.databaseMode ?? "TIMELINE VAULT");
+      setHasRecoveryCode(payload.account?.hasRecoveryCode !== false);
     } catch {
       setLoadError("The local timeline vault is unavailable.");
     } finally {
@@ -732,6 +784,7 @@ export default function MarvelNexus({ request = browserApiRequest }: { request?:
   }
 
   async function handleAuthenticated(isNewAccount: boolean) {
+    setSignedOutNotice("");
     await loadProgress();
     if (isNewAccount) setLoreOpen(true);
   }
@@ -749,6 +802,7 @@ export default function MarvelNexus({ request = browserApiRequest }: { request?:
           setUser(payload.user);
           setViewingState(readState(payload));
           setDatabaseMode(payload.databaseMode ?? "TIMELINE VAULT");
+          setHasRecoveryCode(payload.account?.hasRecoveryCode !== false);
         }
         setLoading(false);
       })
@@ -884,6 +938,15 @@ export default function MarvelNexus({ request = browserApiRequest }: { request?:
     void persistToggle(item, episode, false);
   }
 
+  /** The account panel signed this device out (sign out everywhere, or the account was deleted). */
+  function handleSignedOutByPanel(message: string) {
+    setAccountOpen(false);
+    setSelected(null);
+    setUser(null);
+    setViewingState(EMPTY_STATE);
+    setSignedOutNotice(message);
+  }
+
   async function logout() {
     try {
       const response = await request("/api/auth/logout", { method: "POST" });
@@ -948,7 +1011,7 @@ export default function MarvelNexus({ request = browserApiRequest }: { request?:
     }
 
     function onKeyDown(event: globalThis.KeyboardEvent) {
-      const anotherDialogOpen = Boolean(selected || loreOpen || pendingUnwatch);
+      const anotherDialogOpen = Boolean(selected || loreOpen || pendingUnwatch || accountOpen);
       if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") {
         event.preventDefault();
         if (anotherDialogOpen) return;
@@ -979,11 +1042,11 @@ export default function MarvelNexus({ request = browserApiRequest }: { request?:
 
     document.addEventListener("keydown", onKeyDown);
     return () => document.removeEventListener("keydown", onKeyDown);
-  }, [paletteOpen, selected, loreOpen, pendingUnwatch, nextRequired, selectUniverse]);
+  }, [paletteOpen, selected, loreOpen, pendingUnwatch, accountOpen, nextRequired, selectUniverse]);
 
   if (loading) return <LoadingScreen />;
   if (loadError) return <main className="loading-screen error-screen"><Zap size={34} /><p className="eyebrow">ARCHIVE LINK INTERRUPTED</p><h1>{loadError}</h1><button className="primary-action" onClick={loadProgress}>Retry connection <ArrowRight size={17} /></button></main>;
-  if (!user) return <AuthScreen onAuthenticated={handleAuthenticated} request={request} />;
+  if (!user) return <AuthScreen key={signedOutNotice} onAuthenticated={handleAuthenticated} request={request} initialNotice={signedOutNotice} />;
 
   const activeHero = nextUnlocked ?? nextRequired ?? items.at(-1)!;
   const doomsdayComplete = doomsdayStats.complete;
@@ -1007,8 +1070,11 @@ export default function MarvelNexus({ request = browserApiRequest }: { request?:
           <button className="topbar-tab" aria-pressed={universe === "street"} onClick={() => selectUniverse("street")}>Street</button>
         </nav>
         <div className="operator-block">
-          <span className="vault-status"><i /> {databaseMode}</span>
-          <div className="operator-name"><CircleUserRound size={18} /><div><small>OPERATOR</small><strong>{user.username}</strong></div></div>
+          <button type="button" className="operator-name" onClick={() => setAccountOpen(true)} aria-label={`Open account: ${user.username}`} aria-haspopup="dialog">
+            <CircleUserRound size={18} />
+            <span><small>OPERATOR</small><strong>{user.username}</strong></span>
+            {!hasRecoveryCode && <i className="operator-alert" aria-hidden="true" />}
+          </button>
           <InstallAppButton />
           <button className="icon-button" onClick={() => setPaletteOpen(true)} aria-label="Search the archive (Ctrl K)"><Search size={17} /></button>
           <button className="mobile-lore-action" onClick={() => setLoreOpen(true)} aria-label="Open lore brief"><Orbit size={17} /><span>Lore</span></button>
@@ -1143,9 +1209,20 @@ export default function MarvelNexus({ request = browserApiRequest }: { request?:
         />
       )}
       {pendingUnwatch && <UnwatchConfirmation pending={pendingUnwatch} onCancel={() => setPendingUnwatch(null)} onConfirm={confirmUnwatch} />}
+      {accountOpen && (
+        <AccountPanel
+          username={user.username}
+          databaseMode={databaseMode}
+          hasRecoveryCode={hasRecoveryCode}
+          request={request}
+          onClose={() => setAccountOpen(false)}
+          onRecoveryCodeChanged={() => setHasRecoveryCode(true)}
+          onSignedOut={handleSignedOutByPanel}
+        />
+      )}
       {notice && <div className="toast" role="status" aria-live="polite"><Zap size={16} /> {notice}</div>}
       <ToastStack toasts={delightToasts} onDismiss={dismissDelightToast} onOpenItem={openArchiveItem} />
-      {nextRequired && !nextCardVisible && !selected && !loreOpen && !paletteOpen && (
+      {nextRequired && !nextCardVisible && !selected && !loreOpen && !paletteOpen && !accountOpen && (
         <button
           className="jump-pill"
           onClick={() => {

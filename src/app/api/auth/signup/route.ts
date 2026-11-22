@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { type NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 
+import { generateRecoveryCode, hashRecoveryCode } from "@/lib/account";
 import { db, ensureDatabase } from "@/lib/db";
 import { assertSameOrigin, clientIp, errorResponse, jsonError, RuleError } from "@/lib/http";
 import { hashPassword, newPasswordSchema } from "@/lib/passwords";
@@ -32,11 +33,13 @@ export async function POST(request: NextRequest) {
 
     const id = randomUUID();
     const passwordHash = await hashPassword(input.password);
+    // Shown to the user exactly once, in this response; only its hash is stored.
+    const recoveryCode = generateRecoveryCode();
     try {
       await withWriteLock(db, () =>
         db.execute({
-          sql: "INSERT INTO users (id, username, username_key, password_hash, created_at) VALUES (?, ?, ?, ?, ?)",
-          args: [id, input.username, input.username.toLocaleLowerCase(), passwordHash, new Date().toISOString()],
+          sql: "INSERT INTO users (id, username, username_key, password_hash, recovery_hash, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+          args: [id, input.username, input.username.toLocaleLowerCase(), passwordHash, hashRecoveryCode(recoveryCode), new Date().toISOString()],
         }),
       );
     } catch (error) {
@@ -45,7 +48,7 @@ export async function POST(request: NextRequest) {
       throw error;
     }
 
-    const response = NextResponse.json({ user: { id, username: input.username } }, { status: 201 });
+    const response = NextResponse.json({ user: { id, username: input.username }, recoveryCode }, { status: 201 });
     await createSession(id, response);
     return response;
   } catch (error) {

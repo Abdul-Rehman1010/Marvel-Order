@@ -144,9 +144,8 @@ async function columnsOf(client: Client, table: string) {
 }
 
 /**
- * The later migrations exactly as §4.3 of the plan defines them (versions 2-4). Versions 2 and
- * 3 shipped in packages 1.3 and 1.4 (a test below checks the real ones do the same thing); 4 is
- * not part of `MIGRATIONS` yet (package 1.5 adds it). Here they exercise `addColumn`
+ * The later migrations exactly as §4.3 of the plan defines them (versions 2-4). They shipped in
+ * packages 1.3, 1.4 and 1.5; a test below checks the real ones create the same columns. Here they exercise `addColumn`
  * steps and new tables against a database made by the pre-migration app.
  */
 const PLANNED_2_TO_4: Migration[] = [
@@ -194,8 +193,8 @@ describe("migrate", () => {
     const result = await migrate(client);
 
     expect(result).toEqual({ applied: ALL_VERSIONS, current: LATEST });
-    expect(ALL_VERSIONS).toEqual([1, 2, 3]);
-    expect((await recordedVersions(client)).map((row) => row.version)).toEqual([1, 2, 3]);
+    expect(ALL_VERSIONS).toEqual([1, 2, 3, 4]);
+    expect((await recordedVersions(client)).map((row) => row.version)).toEqual([1, 2, 3, 4]);
     expect((await schemaObjects(client)).map(({ type, name }) => `${type}:${name}`)).toEqual([
       "index:progress_user_idx",
       "index:sessions_user_idx",
@@ -208,13 +207,13 @@ describe("migrate", () => {
     ]);
   });
 
-  it("versions 2 and 3 as shipped create the same columns as the plan's definitions", async () => {
+  it("versions 2 to 4 as shipped create the same columns as the plan's definitions", async () => {
     const shipped = open(newDatabaseUrl());
     await migrate(shipped);
     const planned = open(newDatabaseUrl());
-    await migrate(planned, { migrations: [...BASELINE, PLANNED_2_TO_4[0], PLANNED_2_TO_4[1]] });
+    await migrate(planned, { migrations: WITH_PLANNED });
 
-    for (const table of ["progress", "skips", "rate_limits"]) {
+    for (const table of ["users", "progress", "skips", "rate_limits"]) {
       const describeTable = async (client: Client) =>
         (await client.execute({ sql: "SELECT name, type, dflt_value, pk FROM pragma_table_info(?)", args: [table] })).rows.map((row) => ({ ...row }));
       expect(await describeTable(shipped), table).toEqual(await describeTable(planned));

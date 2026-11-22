@@ -364,7 +364,7 @@ Titles in `code` are catalogue ids. "Full account" means every released unit wat
 - `POST /api/auth/recover { username, recoveryCode, newPassword }` resets the password, issues a new code, deletes all of that user's sessions.
 - `src/components/nexus/account-panel.tsx` (dialog using `useDialogBehavior` from `src/lib/use-motion.ts`), opened from the operator name in the top bar: change password, generate a new recovery code, sign out everywhere, delete account (type the username to confirm; deletes rows from every table in one batch), storage mode line (replaces the "LOCAL VAULT" label in the top bar).
 - Sign-in screen gains "Forgot password?" → recover form.
-- [ ] Acceptance: API tests for each endpoint including wrong-password and rate-limit cases; e2e: sign up, save code, recover with it, old password fails.
+- [x] Acceptance: API tests for each endpoint including wrong-password and rate-limit cases; e2e: sign up, save code, recover with it, old password fails. *(Done 2026-11-22: `tests/api/account.test.ts` (32 tests) covers every endpoint with success, wrong password or code, rate limit, origin and session cases; `tests/e2e/recovery.spec.ts` signs up, downloads and confirms the code, recovers with it, and checks the old password and the used code fail, plus sign-out-everywhere and delete through the panel, at all three sizes. See the 1.5 record.)*
 
 #### 1.6 Quick visual and accessibility fixes (small, independent)
 - Phone collision: in `.checkpoint-counts > div` the label overruns its number at 390 px ("REMAINING93"). Let the label truncate (`overflow: hidden; text-overflow: ellipsis; white-space: nowrap` on `dt`) and stop the number shrinking (`flex: 0 0 auto` on `dd`).
@@ -653,7 +653,7 @@ Each package appends here when it is done: what changed, anything that differs f
 
 **Observed, not acted on.** `npm audit` reports 10 findings, all in packages that were already installed (none come from the test tooling): `next` 16.3.5 (critical: remote code execution in `next/og` `ImageResponse`; the audit lists 16.4.6 as a non-major fix), `zod` and `sharp` (high), and the typescript-eslint and minimatch chain (moderate). The app uses `ImageResponse` for its icons and 3.5 plans to use it for the share card. Updating `next` is a decision for the owner; the `AGENTS.md` warning about breaking changes applies.
 
-### M1 — Correct and safe (in progress: 1.2 done on 2026-11-16, 1.3 on 2026-11-17, 1.4 on 2026-11-22; 1.5 and 1.6 not started)
+### M1 — Correct and safe (in progress: 1.2 done on 2026-11-16, 1.3 on 2026-11-17, 1.4 and 1.5 on 2026-11-22; 1.6 not started)
 
 **1.2 Catalogue and graph** (Opus, 2026-11-16).
 - **Catalogue split.** `src/lib/content.ts` was split by script, so the data was moved, not retyped: `src/lib/catalogue/types.ts`, `mcu.ts`, `xmen.ts`, `street.ts`, `index.ts`, plus two files the §4.2 layout does not list: `build.ts` (the `movie` / `series` / `special` / `episodes` builders the universe files share) and `summaries.ts` (`MOVIE_SUMMARIES`, still applied in `index.ts` exactly as before). `ContentItem` gained `requires?: string[]` and `alsoRequires?: string[]`. Files in `catalogue/` import each other relatively, because `scripts/catalogue-check.mjs` loads the catalogue without the `@/` alias (it still reports the same 12 titles).
@@ -810,3 +810,53 @@ Each package appends here when it is done: what changed, anything that differs f
 - `npx playwright test`: 9 passed on the dev server and 9 passed on a production build (`next start`, production CSP); layout numbers unchanged; no CSP violations. Smoke spec with `CI=true`: passed.
 - `scripts/reset-users.mjs` against a copy of the e2e database: all five tables emptied.
 - Not checked on Vercel: the headers and the CSP on the real domain. That is part of the owner's pre-deploy trial run (`KNOWN_GAPS.md` A1).
+
+**1.5 Account panel and recovery** (Opus, 2026-11-22).
+
+*What exists now.*
+- **Migration 4**: `users.recovery_hash TEXT` and `users.prefs TEXT NOT NULL DEFAULT '{}'`, both as `addColumn` steps, exactly as §4.3. Nothing reads or writes `prefs` yet.
+- **`src/lib/account.ts`.**
+  - Recovery codes: `generateRecoveryCode` makes 20 Crockford base-32 symbols from `crypto.randomBytes` (100 bits; taking 5 bits of each byte keeps symbols uniform), formatted `XXXXX-XXXXX-XXXXX-XXXXX`. `normalizeRecoveryCode` forgives case, spaces, dashes, `O`→`0` and `I`/`L`→`1`. `hashRecoveryCode` is SHA-256 of the canonical form. `recoveryCodeMatches` compares in constant time.
+  - `issueRecoveryCode`, `deleteUserSessions`, and `deleteAccount`. Account deletion is one atomic batch: `skips`, `progress`, `sessions`, the username's `rate_limits` buckets, then `users`.
+  - `authorizeAccountChange(request, schema)` runs the checks every account change shares, in this order: same origin (403), a session (401), a valid body (400), the password-attempt limit (429), and the current password (403 `wrong-password`).
+- **Sign-up** stores the code's hash in the same `INSERT` and returns `recoveryCode` once. `GET /api/progress` adds `account: { hasRecoveryCode }`, read in the same query as the session.
+- **`POST /api/auth/recover { username, recoveryCode, newPassword }`.**
+  - Same origin; 5 attempts per username per hour; new-password rules.
+  - One reply for an unknown username, an account without a code, and a wrong code: 401 "Username or recovery code is incorrect."
+  - On success, one atomic batch sets the new password and a new code hash and deletes every session of the account. It then clears the username's recover and sign-in counters, signs this device in with a fresh session, and returns the new code.
+- **Account endpoints**, each needing the current password: `POST /api/account/password` (`{ currentPassword, newPassword }`), `POST /api/account/recovery-code` (returns a new code), `POST /api/account/sessions/revoke` (ends every session including this one and clears the cookie), and `DELETE /api/account` (`{ currentPassword, confirmUsername }`; the username in any letter case, otherwise 400 `confirm-mismatch`).
+- **Client.**
+  - `src/components/nexus/recovery-code-dialog.tsx`: an `alertdialog` with the code, Copy, Download (a `.txt` with the username and code, via a blob link), and an "I have saved this code somewhere safe" box. Continue and Escape do nothing until the box is ticked. It is used after sign-up, after recovery, and from the panel.
+  - `src/components/nexus/account-panel.tsx` (`useDialogBehavior`): the storage line, one shared "Current password" field, then Change password, Recovery code (status plus make a new one), Sign out everywhere, and Delete account (the button stays disabled until the username is typed). Errors and confirmations appear in each section.
+  - Top bar: the operator name is now the button that opens the panel, with a gold dot when the account has no recovery code. The "LOCAL VAULT" label moved into the panel.
+  - Sign-in screen: "Forgot password?" opens a recover form (username, recovery code, new password), and a notice appears after the panel signs the device out.
+- `scripts/reset-users.mjs` needed no change (no new table).
+
+*Decisions beyond the text above.*
+1. **Wrong current password is 403, not 401.** In this app 401 means "not signed in", and the client treats it that way.
+2. **Account changes share the sign-in limit** (8 per 15 minutes per username). The acceptance asks for rate-limit cases on every endpoint, and without a limit a stolen session could guess the password freely. Eight wrong attempts in the panel therefore also block sign-in for 15 minutes, and a correct one clears the count.
+3. **Recovery signs the recovering device in.** It ends every session as written, then starts one for the device that proved ownership, and shows the new code.
+4. **Changing the password does not sign other devices out.** "Sign out everywhere" is a separate action, and the panel says so.
+5. **Phones get an account button.** At phone width the operator name was hidden, so it becomes a 44 px person-icon button. To keep the brand on one line, the Lore button is icon-only below 430 px; it keeps its accessible name, "Open lore brief".
+
+*Tests.*
+- `tests/api/account.test.ts` (32):
+  - code format, randomness and forgiving input;
+  - sign-up stores only the hash; a pre-1.5 account reports no code;
+  - recover: success (new code, every old session ended, fresh session, old password and used code fail); the same reply for a wrong code, an unknown user, a codeless account and garbage input, with nothing changed; password rules; the 6th attempt is 429 even with the right code; recovery works while sign-in is rate-limited; another site is refused;
+  - for each of the four account endpoints: 401 without a session, 403 from another site, 403 for a wrong current password with nothing changed, and the 9th attempt 429 (shared with sign-in);
+  - password change keeps sessions, enforces the rules, and accepts a short legacy password as the current one;
+  - a new code invalidates the old one, and a pre-1.5 account can get its first code;
+  - revoke ends every session of the account and only that account;
+  - delete removes every row of the account and its username buckets, keeps another user's data, frees the username, refuses a mismatched confirmation, and is all or nothing (a trigger makes the last statement fail: nothing is deleted).
+- `tests/helpers/api-app.ts`: shared loader for route handlers on a temp database.
+- `tests/api/migrations.test.ts` now expects versions 1–4 and checks the shipped versions 2–4 against the plan's definitions.
+- E2E:
+  - new `tests/e2e/recovery.spec.ts` (2 tests × 3 sizes), described in the acceptance note;
+  - the smoke spec now confirms the code dialog after sign-up;
+  - the screens spec adds `09-account-panel` and `10-recovery-code`, and the panel and the dialog were looked at at all three sizes.
+
+**Verification after 1.5, 2026-11-22** (scratch databases only):
+- lint: 0 errors (same one warning); typecheck: clean; `npm test`: 226 passed, three runs in a row; `npm run build`: OK, with the five new routes.
+- `npx playwright test`: 15 passed on the dev server and 15 on a production build (production CSP), with no CSP violations and layout numbers unchanged (1,379 / 1,379 / 2,242 px). Smoke spec with `CI=true`: passed.
+- `marvel-vault.db` and `public/watch-links.csv` untouched.

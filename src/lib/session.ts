@@ -33,8 +33,11 @@ const LIFETIME_MS = SESSION_COOKIE_MAX_AGE_SECONDS * 1000;
 
 export type SessionUser = { id: string; username: string };
 
-/** A signed-in request. `token` is the raw cookie value; never send any of this to the client except `user`. */
-export type Session = { user: SessionUser; token: string; expiresAt: string };
+/**
+ * A signed-in request. `token` is the raw cookie value: never send it to the client.
+ * `hasRecoveryCode` is false for accounts created before package 1.5 until they make one.
+ */
+export type Session = { user: SessionUser; token: string; expiresAt: string; hasRecoveryCode: boolean };
 
 function hashToken(token: string) {
   return createHash("sha256").update(token).digest("hex");
@@ -74,6 +77,11 @@ export async function deleteSession(request: NextRequest, response: NextResponse
   if (token) {
     await withWriteLock(db, () => db.execute({ sql: "DELETE FROM sessions WHERE token_hash = ?", args: [hashToken(token)] }));
   }
+  clearSessionCookie(response);
+}
+
+/** Tells the browser to drop the session cookie. */
+export function clearSessionCookie(response: NextResponse) {
   response.cookies.set(SESSION_COOKIE, "", {
     httpOnly: true,
     sameSite: "lax",
@@ -90,7 +98,7 @@ export async function getSession(request: NextRequest): Promise<Session | null> 
   if (!token) return null;
 
   const result = await db.execute({
-    sql: `SELECT users.id, users.username, sessions.expires_at
+    sql: `SELECT users.id, users.username, sessions.expires_at, users.recovery_hash IS NOT NULL AS has_recovery_code
           FROM sessions
           JOIN users ON users.id = sessions.user_id
           WHERE sessions.token_hash = ?`,
@@ -98,7 +106,12 @@ export async function getSession(request: NextRequest): Promise<Session | null> 
   });
   const row = result.rows[0];
   if (!row) return null;
-  return { user: { id: String(row.id), username: String(row.username) }, token, expiresAt: String(row.expires_at) };
+  return {
+    user: { id: String(row.id), username: String(row.username) },
+    token,
+    expiresAt: String(row.expires_at),
+    hasRecoveryCode: Number(row.has_recovery_code) === 1,
+  };
 }
 
 export async function getSessionUser(request: NextRequest): Promise<SessionUser | null> {

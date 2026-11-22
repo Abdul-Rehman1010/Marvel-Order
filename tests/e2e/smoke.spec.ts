@@ -15,6 +15,13 @@ test("sign up, mark Iron Man, reload, un-watch, sign out", async ({ page }, test
   await page.locator('input[name="password"]').fill(TEST_PASSWORD);
   await page.getByRole("button", { name: "Initialize profile" }).click();
 
+  // A new account is shown its recovery code once, before anything else.
+  const codeDialog = page.getByRole("alertdialog", { name: "Save your recovery code" });
+  await expect(codeDialog).toBeVisible();
+  await expect(codeDialog.locator(".recovery-code")).toHaveText(/^[0-9A-Z]{5}(-[0-9A-Z]{5}){3}$/);
+  await codeDialog.getByLabel("I have saved this code somewhere safe").check();
+  await codeDialog.getByRole("button", { name: "Continue" }).click();
+
   // A new account lands on the lore guide first; close it to reach the dashboard.
   const guide = page.getByRole("dialog", { name: "Doom Flix guide" });
   await expect(guide).toBeVisible();

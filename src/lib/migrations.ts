@@ -88,6 +88,17 @@ export const MIGRATIONS: readonly Migration[] = [
     // data; `reset_at` is epoch milliseconds.
     steps: ["CREATE TABLE IF NOT EXISTS rate_limits (bucket TEXT PRIMARY KEY, count INTEGER NOT NULL, reset_at INTEGER NOT NULL)"],
   },
+  {
+    version: 4,
+    name: "users.recovery_hash and users.prefs (package 1.5)",
+    // `recovery_hash` is the SHA-256 of the account's recovery code (NULL until one is issued, which
+    // is the case for every account created before 1.5). `prefs` is reserved for per-account
+    // preferences; nothing writes it yet. Both are additive, so the pre-1.5 app still runs.
+    steps: [
+      { kind: "addColumn", table: "users", column: "recovery_hash", definition: "TEXT" },
+      { kind: "addColumn", table: "users", column: "prefs", definition: "TEXT NOT NULL DEFAULT '{}'" },
+    ],
+  },
 ];
 
 const CREATE_VERSION_TABLE =

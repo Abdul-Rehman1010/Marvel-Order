@@ -539,6 +539,7 @@ describe("GET /api/progress", () => {
       outOfOrder: [],
       unrecognised: [],
       databaseMode: "LOCAL VAULT",
+      account: { hasRecoveryCode: false }, // this test's user was inserted directly, without a code
     });
   });
 

@@ -11,7 +11,7 @@ import path from "node:path";
 
 import { expect, test, type Page, type TestInfo } from "@playwright/test";
 
-import { markWatchedViaApi, settle, signUpViaApi, uniqueUsername, useOwnClientIp, watchCspViolations } from "./helpers";
+import { markWatchedViaApi, settle, signUpViaApi, TEST_PASSWORD, uniqueUsername, useOwnClientIp, watchCspViolations } from "./helpers";
 
 const SEED = [
   // Nine MCU films, in release order.
@@ -118,7 +118,8 @@ test("baseline screenshots and layout numbers", async ({ page }, testInfo) => {
   await shots.take(page, "01-sign-in");
 
   // Seed the profile, then load the signed-in dashboard.
-  await signUpViaApi(page.request, uniqueUsername(testInfo));
+  const username = uniqueUsername(testInfo);
+  await signUpViaApi(page.request, username);
   await markWatchedViaApi(page.request, SEED);
   await page.goto("/");
   await expect(page.locator(".timeline-card").first()).toBeVisible();
@@ -179,6 +180,20 @@ test("baseline screenshots and layout numbers", async ({ page }, testInfo) => {
   await page.keyboard.press("l");
   await expect(page.getByRole("dialog", { name: "Doom Flix guide" })).toBeVisible();
   await shots.take(page, "08-lore-guide");
+  await page.getByRole("button", { name: "Back to dashboard" }).click();
+  await expect(page.getByRole("dialog", { name: "Doom Flix guide" })).toBeHidden();
+
+  // 9. Account panel, opened from the operator name (an icon button on phones).
+  await page.getByRole("button", { name: `Open account: ${username}` }).click();
+  const panel = page.getByRole("dialog", { name: username });
+  await expect(panel).toBeVisible();
+  await shots.take(page, "09-account-panel");
+
+  // 10. A new recovery code, made from the panel.
+  await panel.getByLabel("Current password").fill(TEST_PASSWORD);
+  await panel.getByRole("button", { name: "Make a new recovery code" }).click();
+  await expect(page.getByRole("alertdialog", { name: "Your new recovery code" })).toBeVisible();
+  await shots.take(page, "10-recovery-code");
 
   expect(cspViolations, "Content Security Policy violations").toEqual([]);
 });

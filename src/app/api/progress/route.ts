@@ -39,7 +39,12 @@ export async function GET(request: NextRequest) {
     if (!session) return NextResponse.json({ error: "Not signed in." }, { status: 401 });
     const { user } = session;
     const state = await getViewingState(user.id);
-    const response = NextResponse.json({ user, ...describeState(state), databaseMode: databaseMode() });
+    const response = NextResponse.json({
+      user,
+      ...describeState(state),
+      databaseMode: databaseMode(),
+      account: { hasRecoveryCode: session.hasRecoveryCode },
+    });
     // The app calls this on every load: that is what keeps a session alive indefinitely.
     await extendSession(session, response);
     return response;
