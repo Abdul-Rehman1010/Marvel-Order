@@ -4,7 +4,8 @@ import Image from "next/image";
 import { Check, Compass, LockKeyhole, Orbit } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
 
-import { CONTENT, isUnlocked, itemComplete, type ContentItem, type Universe } from "@/lib/content";
+import { CONTENT, type ContentItem, type Universe } from "@/lib/content";
+import { isWatchedComplete, lockReason, type ViewingIndex } from "@/lib/engine/state";
 import { posterUrl } from "@/lib/media";
 import { useDialogBehavior } from "@/lib/use-motion";
 
@@ -12,13 +13,16 @@ const UNIVERSE_TAGS: Record<Universe, string> = { mcu: "MCU", xmen: "X-Men", str
 
 export function CommandPalette({
   onClose,
-  watched,
+  viewing,
+  now,
   onOpenItem,
   onSelectUniverse,
   onOpenLore,
 }: {
   onClose: () => void;
-  watched: Set<string>;
+  viewing: ViewingIndex;
+  /** The clock release locks are checked against (epoch milliseconds). */
+  now: number;
   onOpenItem: (item: ContentItem) => void;
   onSelectUniverse: (universe: Universe) => void;
   onOpenLore: () => void;
@@ -97,8 +101,10 @@ export function CommandPalette({
 
         <div ref={listRef} className="palette-results">
           {results.map((item, index) => {
-            const complete = itemComplete(item, watched);
-            const unlocked = isUnlocked(item, watched);
+            const complete = isWatchedComplete(item, viewing);
+            // Same rule as the cards: a series waiting for its episode list is not drawn as locked.
+            const lock = lockReason(item, viewing, now);
+            const unlocked = lock === null || lock.kind === "pending";
             return (
               <button
                 key={item.id}

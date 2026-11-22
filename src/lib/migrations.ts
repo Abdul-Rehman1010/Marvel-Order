@@ -15,6 +15,8 @@
  */
 import type { Client, Transaction } from "@libsql/client";
 
+import { withWriteLock } from "./write-lock";
+
 export type AddColumnStep = {
   kind: "addColumn";
   table: string;
@@ -62,6 +64,30 @@ export const MIGRATIONS: readonly Migration[] = [
       "CREATE INDEX IF NOT EXISTS sessions_user_idx ON sessions(user_id)",
     ],
   },
+  {
+    version: 2,
+    name: "progress.backfilled and the skips table (package 1.3)",
+    // `backfilled` marks rows created by catch-up or bulk marking, so pace statistics can ignore
+    // them. The pre-1.3 app still works against this schema (the new column has a default), so
+    // rolling the app back after this migration is safe.
+    steps: [
+      { kind: "addColumn", table: "progress", column: "backfilled", definition: "INTEGER NOT NULL DEFAULT 0" },
+      `CREATE TABLE IF NOT EXISTS skips (
+            user_id TEXT NOT NULL,
+            content_id TEXT NOT NULL,
+            reason TEXT NOT NULL DEFAULT 'manual',
+            skipped_at TEXT NOT NULL,
+            PRIMARY KEY (user_id, content_id)
+          )`,
+    ],
+  },
+  {
+    version: 3,
+    name: "rate_limits table (package 1.4)",
+    // Fixed-window counters for sign-in and sign-up attempts (src/lib/rate-limit.ts). Holds no user
+    // data; `reset_at` is epoch milliseconds.
+    steps: ["CREATE TABLE IF NOT EXISTS rate_limits (bucket TEXT PRIMARY KEY, count INTEGER NOT NULL, reset_at INTEGER NOT NULL)"],
+  },
 ];
 
 const CREATE_VERSION_TABLE =
@@ -97,12 +123,13 @@ export async function migrate(client: Client, options: MigrateOptions = {}): Pro
     return { applied: [], current: highest(recorded) };
   }
 
-  await withRetry(() => client.execute(CREATE_VERSION_TABLE), maxAttempts);
+  // Local databases: one writer at a time in this process (see write-lock.ts).
+  await withRetry(() => withWriteLock(client, () => client.execute(CREATE_VERSION_TABLE)), maxAttempts);
 
   const applied: number[] = [];
   for (const migration of migrations) {
     if (recorded.has(migration.version)) continue;
-    const didApply = await withRetry(() => applyIfMissing(client, migration), maxAttempts);
+    const didApply = await withRetry(() => withWriteLock(client, () => applyIfMissing(client, migration)), maxAttempts);
     if (didApply) applied.push(migration.version);
   }
 

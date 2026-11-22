@@ -144,9 +144,10 @@ async function columnsOf(client: Client, table: string) {
 }
 
 /**
- * The later migrations exactly as §4.3 of the plan defines them (versions 2-4). They are
- * not part of `MIGRATIONS` yet (packages 1.3-1.5 add them); here they exercise `addColumn`
- * steps and new tables against today's data.
+ * The later migrations exactly as §4.3 of the plan defines them (versions 2-4). Versions 2 and
+ * 3 shipped in packages 1.3 and 1.4 (a test below checks the real ones do the same thing); 4 is
+ * not part of `MIGRATIONS` yet (package 1.5 adds it). Here they exercise `addColumn`
+ * steps and new tables against a database made by the pre-migration app.
  */
 const PLANNED_2_TO_4: Migration[] = [
   {
@@ -171,46 +172,90 @@ const PLANNED_2_TO_4: Migration[] = [
     ],
   },
 ];
-const WITH_PLANNED = [...MIGRATIONS, ...PLANNED_2_TO_4];
+/** Version 1 only: what a database looked like before any later migration. */
+const BASELINE = MIGRATIONS.slice(0, 1);
+const WITH_PLANNED = [...BASELINE, ...PLANNED_2_TO_4];
+const LATEST = MIGRATIONS.length;
+const ALL_VERSIONS = MIGRATIONS.map((migration) => migration.version);
+
+/** `after` cut down to the columns `before` had, so new columns do not hide a changed old value. */
+function originalColumns(before: Record<string, unknown[]>, after: Record<string, unknown[]>) {
+  return Object.fromEntries(
+    Object.entries(after).map(([table, rows]) => {
+      const keys = Object.keys((before[table]?.[0] ?? {}) as object);
+      return [table, rows.map((row) => Object.fromEntries(keys.map((key) => [key, (row as Record<string, unknown>)[key]])))];
+    }),
+  );
+}
 
 describe("migrate", () => {
   it("brings a fresh database to the latest version", async () => {
     const client = open(newDatabaseUrl());
     const result = await migrate(client);
 
-    expect(result).toEqual({ applied: [1], current: 1 });
-    expect((await recordedVersions(client)).map((row) => row.version)).toEqual([1]);
+    expect(result).toEqual({ applied: ALL_VERSIONS, current: LATEST });
+    expect(ALL_VERSIONS).toEqual([1, 2, 3]);
+    expect((await recordedVersions(client)).map((row) => row.version)).toEqual([1, 2, 3]);
     expect((await schemaObjects(client)).map(({ type, name }) => `${type}:${name}`)).toEqual([
       "index:progress_user_idx",
       "index:sessions_user_idx",
       "table:progress",
+      "table:rate_limits",
       "table:schema_migrations",
       "table:sessions",
+      "table:skips",
       "table:users",
     ]);
+  });
+
+  it("versions 2 and 3 as shipped create the same columns as the plan's definitions", async () => {
+    const shipped = open(newDatabaseUrl());
+    await migrate(shipped);
+    const planned = open(newDatabaseUrl());
+    await migrate(planned, { migrations: [...BASELINE, PLANNED_2_TO_4[0], PLANNED_2_TO_4[1]] });
+
+    for (const table of ["progress", "skips", "rate_limits"]) {
+      const describeTable = async (client: Client) =>
+        (await client.execute({ sql: "SELECT name, type, dflt_value, pk FROM pragma_table_info(?)", args: [table] })).rows.map((row) => ({ ...row }));
+      expect(await describeTable(shipped), table).toEqual(await describeTable(planned));
+    }
   });
 
   it("creates exactly the schema the app used before migrations existed", async () => {
     const legacy = open(newDatabaseUrl());
     await legacy.batch(LEGACY_SCHEMA, "write");
     const migrated = open(newDatabaseUrl());
-    await migrate(migrated);
+    await migrate(migrated, { migrations: BASELINE });
 
     const withoutVersionTable = (await schemaObjects(migrated)).filter((object) => object.name !== "schema_migrations");
     expect(withoutVersionTable).toEqual(await schemaObjects(legacy));
   });
 
-  it("upgrades a database created by today's code without changing any data", async () => {
+  it("version 1 on a database created by the pre-migration app changes no data and no schema", async () => {
     const client = open(newDatabaseUrl());
     await createLegacyDatabaseWithData(client);
     const dataBefore = await dumpData(client);
     const schemaBefore = await schemaObjects(client);
 
-    const result = await migrate(client);
+    const result = await migrate(client, { migrations: BASELINE });
 
     expect(result).toEqual({ applied: [1], current: 1 });
     expect(await dumpData(client)).toEqual(dataBefore);
     expect((await schemaObjects(client)).filter((object) => object.name !== "schema_migrations")).toEqual(schemaBefore);
+  });
+
+  it("the shipped migrations upgrade a pre-migration database: every old value is unchanged, new columns get defaults", async () => {
+    const client = open(newDatabaseUrl());
+    await createLegacyDatabaseWithData(client);
+    const dataBefore = await dumpData(client);
+
+    expect(await migrate(client)).toEqual({ applied: ALL_VERSIONS, current: LATEST });
+
+    const dataAfter = await dumpData(client);
+    expect(originalColumns(dataBefore, dataAfter)).toEqual(dataBefore);
+    expect(dataAfter.progress.every((row: Record<string, unknown>) => row.backfilled === 0)).toBe(true);
+    expect(await columnsOf(client, "skips")).toEqual(["user_id", "content_id", "reason", "skipped_at"]);
+    expect((await client.execute("SELECT COUNT(*) AS n FROM skips")).rows[0].n).toBe(0);
   });
 
   it("is a no-op the second time, and does not even take the write lock", async () => {
@@ -224,7 +269,7 @@ describe("migrate", () => {
     const transactionSpy = vi.spyOn(client, "transaction");
     const second = await migrate(client);
 
-    expect(second).toEqual({ applied: [], current: 1 });
+    expect(second).toEqual({ applied: [], current: LATEST });
     expect(transactionSpy).not.toHaveBeenCalled();
     expect(executeSpy).toHaveBeenCalledTimes(1); // the single read of schema_migrations
     expect(await recordedVersions(client)).toEqual(versionsAfterFirst);
@@ -265,7 +310,7 @@ describe("migrate", () => {
   it("finishes a half-applied database: a column that already exists is not added twice", async () => {
     const client = open(newDatabaseUrl());
     await createLegacyDatabaseWithData(client);
-    await migrate(client);
+    await migrate(client, { migrations: BASELINE });
     // Simulate a crash after the ALTER ran but before version 2 was recorded (or a hand-made fix).
     await client.execute("ALTER TABLE progress ADD COLUMN backfilled INTEGER NOT NULL DEFAULT 0");
 
@@ -275,7 +320,7 @@ describe("migrate", () => {
 
   it("rolls a failing migration back completely and does not record it; a fixed migration then applies", async () => {
     const client = open(newDatabaseUrl());
-    await migrate(client);
+    await migrate(client, { migrations: BASELINE });
     const broken: Migration = {
       version: 2,
       name: "broken",
@@ -286,7 +331,7 @@ describe("migrate", () => {
       ],
     };
 
-    await expect(migrate(client, { migrations: [...MIGRATIONS, broken] })).rejects.toThrow();
+    await expect(migrate(client, { migrations: [...BASELINE, broken] })).rejects.toThrow();
     expect((await recordedVersions(client)).map((row) => row.version)).toEqual([1]);
     expect((await schemaObjects(client)).some((object) => object.name === "half_done")).toBe(false);
     expect(await columnsOf(client, "progress")).not.toContain("backfilled");
@@ -296,8 +341,8 @@ describe("migrate", () => {
 
   it("refuses a migration list with a gap or a duplicate version", async () => {
     const client = open(newDatabaseUrl());
-    await expect(migrate(client, { migrations: [...MIGRATIONS, { ...PLANNED_2_TO_4[1] }] })).rejects.toThrow(/without gaps/);
-    await expect(migrate(client, { migrations: [...MIGRATIONS, { ...MIGRATIONS[0] }] })).rejects.toThrow(/without gaps/);
+    await expect(migrate(client, { migrations: [...BASELINE, { ...PLANNED_2_TO_4[1] }] })).rejects.toThrow(/without gaps/);
+    await expect(migrate(client, { migrations: [...BASELINE, { ...BASELINE[0] }] })).rejects.toThrow(/without gaps/);
   });
 
   it("rejects an unsafe identifier in an addColumn step", async () => {
@@ -307,13 +352,13 @@ describe("migrate", () => {
       name: "hostile",
       steps: [{ kind: "addColumn", table: "progress; DROP TABLE users", column: "x", definition: "TEXT" }],
     };
-    await expect(migrate(client, { migrations: [...MIGRATIONS, hostile] })).rejects.toThrow(/Unsafe SQL identifier/);
+    await expect(migrate(client, { migrations: [...BASELINE, hostile] })).rejects.toThrow(/Unsafe SQL identifier/);
     expect(await columnsOf(client, "users")).toContain("id");
   });
 });
 
 describe("two servers starting at once", () => {
-  it("ensureDatabase() from two separate server instances on one file: both succeed, version 1 recorded once", async () => {
+  it("ensureDatabase() from two separate server instances on one file: both succeed, each version recorded once", async () => {
     const url = newDatabaseUrl();
     const seed = open(url);
     await createLegacyDatabaseWithData(seed);
@@ -330,8 +375,8 @@ describe("two servers starting at once", () => {
 
     await expect(Promise.all([serverA.ensureDatabase(), serverB.ensureDatabase()])).resolves.toEqual([undefined, undefined]);
 
-    expect((await recordedVersions(seed)).map((row) => row.version)).toEqual([1]);
-    expect(await dumpData(seed)).toEqual(dataBefore);
+    expect((await recordedVersions(seed)).map((row) => row.version)).toEqual(ALL_VERSIONS);
+    expect(originalColumns(dataBefore, await dumpData(seed))).toEqual(dataBefore);
   });
 
   it("many clients racing through later-style migrations: every call succeeds and each version is recorded once", async () => {

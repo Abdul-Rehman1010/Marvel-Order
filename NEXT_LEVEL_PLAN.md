@@ -346,7 +346,7 @@ Titles in `code` are catalogue ids. "Full account" means every released unit wat
 - Rows already left out of order by the old bugs: do **not** delete them automatically. `GET /api/progress` includes `outOfOrder: string[]` from `outOfOrderTitles`; those cards show "Watched out of order" and their un-watch control stays enabled (today un-ticking is disabled on locked titles at three places in `marvel-nexus.tsx`: the card action, the episode rows, and the drawer action, so such rows cannot be removed at all).
 - Everything that reads progress must take the viewing index, not a bare `Set<string>`: besides `marvel-nexus.tsx`, that is `src/components/nexus/command-palette.tsx`, `multiverse-shelf.tsx`, `lore-scenes.tsx` and `lore-experience.tsx`.
 - `GET /api/progress` returns the new shape; the client (`marvel-nexus.tsx`) is adapted minimally: build the viewing index from `state`, keep its current request flow (the outbox arrives in 2.1). Replace all `formatRuntime` call sites. Update `scripts/reset-users.mjs` to clear `skips`.
-- [ ] Acceptance: all regression tests and the §4.7 matrix rows for graph, watch, unwatch, stats, properties and persistence are green; characterisation snapshot still identical for watched-only states; e2e smoke green.
+- [x] Acceptance: all regression tests and the §4.7 matrix rows for graph, watch, unwatch, stats, properties and persistence are green; characterisation snapshot still identical for watched-only states; e2e smoke green. *(Done 2026-11-17: 174 unit and API tests pass, including the seven regressions and the skip, bulk and unrecognised-row rows as well; `tests/unit/characterisation.test.ts` is untouched and now runs against the new engine; all 9 Playwright tests pass. See the 1.3 record for the decisions and one client-library problem found on the way.)*
 
 #### 1.4 Account security hardening
 - `src/lib/rate-limit.ts` (migration 3), fixed-window counters with one upsert per check. Limits: login 8 per 15 min per username and 40 per 15 min per IP; signup 5 per hour per IP; recover 5 per hour per username. IP = first entry of `x-forwarded-for`, else `x-real-ip`, else `"unknown"`. Over the limit → 429 with `Retry-After`; a successful login clears that username's bucket.
@@ -354,9 +354,10 @@ Titles in `code` are catalogue ids. "Full account" means every released unit wat
 - New passwords need 8–72 characters (`signup`, `recover`, change-password). The sign-in form keeps accepting existing shorter passwords; the signup form's `minLength` becomes 8.
 - `src/lib/http.ts`: `assertSameOrigin`, `jsonError`, a `RuleError` class. Apply to every POST/PUT/DELETE handler.
 - Sessions: delete expired sessions on each login; extend a session (row and cookie) when under 15 days remain, in route handlers only (cookies cannot be set during a Server Component render).
+  - **Owner change (2026-11-22): sessions never expire.** The app holds no confidential data and people return after long breaks, so nobody should be signed out for being away. Implemented as: the server never refuses a session for its age; the cookie is set for 400 days (the longest browsers keep a cookie) and pushed back to 400 days on each app load, at most once a day; `expires_at` now records when the browser will have dropped the cookie, and sign-in tidies away rows more than a day past it. Signing out still ends a session.
 - `next.config.ts` `headers()`: `X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY`, `Referrer-Policy: strict-origin-when-cross-origin`, `Permissions-Policy: camera=(), microphone=(), geolocation=()`, `Strict-Transport-Security` in production, and the no-nonce CSP from the bundled guide extended with `connect-src 'self'; worker-src 'self'; manifest-src 'self'`.
 - Tests: the ninth wrong login within the window returns 429; cross-origin POST returns 403; signup with a 7-character password returns 400. E2E asserts no CSP violations in the console on every screen.
-- [ ] Acceptance: tests green; headers present on `curl -I`.
+- [x] Acceptance: tests green; headers present on `curl -I`. *(Done 2026-11-22: 194 unit and API tests pass, including the three named tests; all 9 Playwright tests pass on the dev server and on a production build, with no CSP violation on any screen; `curl -I` against `next start` shows all six headers. See the 1.4 record.)*
 
 #### 1.5 Account panel and recovery
 - Migration 4. Signup generates a recovery code (20 Crockford-base32 characters shown as four groups of five), stores its SHA-256, and returns it once; the client shows it in a dialog with Copy and Download and an "I saved it" confirmation.
@@ -652,7 +653,7 @@ Each package appends here when it is done: what changed, anything that differs f
 
 **Observed, not acted on.** `npm audit` reports 10 findings, all in packages that were already installed (none come from the test tooling): `next` 16.3.5 (critical: remote code execution in `next/og` `ImageResponse`; the audit lists 16.4.6 as a non-major fix), `zod` and `sharp` (high), and the typescript-eslint and minimatch chain (moderate). The app uses `ImageResponse` for its icons and 3.5 plans to use it for the share card. Updating `next` is a decision for the owner; the `AGENTS.md` warning about breaking changes applies.
 
-### M1 — Correct and safe (in progress: 1.2 done on 2026-11-16; 1.3–1.6 not started)
+### M1 — Correct and safe (in progress: 1.2 done on 2026-11-16, 1.3 on 2026-11-17, 1.4 on 2026-11-22; 1.5 and 1.6 not started)
 
 **1.2 Catalogue and graph** (Opus, 2026-11-16).
 - **Catalogue split.** `src/lib/content.ts` was split by script, so the data was moved, not retyped: `src/lib/catalogue/types.ts`, `mcu.ts`, `xmen.ts`, `street.ts`, `index.ts`, plus two files the §4.2 layout does not list: `build.ts` (the `movie` / `series` / `special` / `episodes` builders the universe files share) and `summaries.ts` (`MOVIE_SUMMARIES`, still applied in `index.ts` exactly as before). `ContentItem` gained `requires?: string[]` and `alsoRequires?: string[]`. Files in `catalogue/` import each other relatively, because `scripts/catalogue-check.mjs` loads the catalogue without the `@/` alias (it still reports the same 12 titles).
@@ -691,3 +692,121 @@ Each package appends here when it is done: what changed, anything that differs f
 - Playwright, 6 passed with layout numbers identical to the baseline at all three sizes. A `next dev` the agent did not start (PID 41692, port 3000, almost certainly the owner's) held this folder's dev-server lock, so the run used a production build: `next build` plus `next start -p 3210` on `file:.tmp/e2e.db`, through a temporary config in `.tmp/` that was then deleted. `playwright.config.ts` is unchanged.
 - `marvel-vault.db`: it is 77,824 bytes, modified 2026-11-16 23:23 (it was 73,728 bytes on 2026-11-15), and no agent command opened it. The growth is exactly one 4 KB page, which fits the owner's own dev server running the 0.5 code and creating `schema_migrations` on its first request.
 - `public/watch-links.csv` is untouched.
+
+**1.3 Reducer, transactional persistence and the progress bug fixes** (Fable, 2026-11-17).
+
+*What exists now.*
+- **Engine** (`src/lib/engine/`, pure, shared by server and client):
+  - `state.ts`: the types from §4.4, `indexOf`, `isWatchedComplete`, `isSatisfied`, `isOutstanding`, `missingPrerequisite`, `lockReason`, `outOfOrderTitles`, plus `unrecognisedIds`, `watchedUnitCount`, `unitEpisodes`, `isUnitOf`, `indexOfKeys`, `progressKey`, `EMPTY_STATE`.
+  - `reducer.ts`: `applyAction(state, action, now)` for all seven action types, with the `Outcome` shape from §4.4.
+  - `stats.ts`: `getStats(items, index, { includeOptional })`.
+  - `release.ts`: `isReleased`, `releaseMoment`, `formatReleaseDate` (always UTC).
+  - `format.ts`: `formatDuration`, `formatRuntimeOf`, `formatLockReason`.
+  - `graph.ts` gained `ancestors(id)` and `graphRank(id)` (graph order: prerequisites first, then release date, then catalogue position).
+- **Migration 2** in `src/lib/migrations.ts`: `progress.backfilled` (an `addColumn` step) and the `skips` table, exactly as §4.3 defines them. The 1.2 code still works against the migrated schema, so rolling the app back is safe.
+- **`src/lib/progress-store.ts`**: `applyUserAction(userId, action, confirmCleared)` is one write transaction: read rows and skips, run `applyAction`, write only the difference, commit.
+  - Deletes name exact `(content_id, episode)` pairs from the reducer's diff, so a row the catalogue does not recognise can never be deleted, even when its own title is cleared.
+  - Statement count is fixed, not per title: two reads plus one statement per 200 changed rows. Un-watching Iron Man on a full account (59 titles cleared) is 2 reads and 1 delete; building a full account (382 rows) is 2 reads and 2 inserts.
+  - `clearDependents`, `clearInvalidCompletedItems`, `updateProgress`, `getProgress`, `recordsToSet` and `serverUnlockReason` are gone.
+- **`/api/progress`**:
+  - `GET` returns `{ user, state: { rows, skips }, outOfOrder, unrecognised, databaseMode }`.
+  - `POST` takes `{ action, confirmCleared? }` (watch, unwatch, watchAll, skip, unskip, bulk) and still accepts the old `{ contentId, episode, watched }` body. It returns `{ state, outOfOrder, unrecognised, cleared }`.
+  - Rule failures are 409 with `{ error, code, contentId?, missingId? }`; `confirm-required` is 409 with `cleared` and the current state; a bad body is 400; anything unexpected is logged and returned as a generic 500.
+  - `import` is not accepted here; it gets its own route in 4.1. `assertSameOrigin` arrives with `http.ts` in 1.4.
+- **Client.** `marvel-nexus.tsx`, `command-palette.tsx`, `multiverse-shelf.tsx`, `lore-scenes.tsx` and `lore-experience.tsx` take a `viewing: ViewingIndex` prop (and `now` where a lock is shown) instead of `watched: Set<string>`.
+  - The request flow and the existing un-watch confirmation are unchanged (2.1 replaces them); the POST body is now `{ action }`.
+  - A title in `outOfOrder` shows "Watched out of order" on its card and a notice in its drawer, and its un-watch control is enabled at all three places (card action, episode rows, drawer action).
+  - `formatRuntime` is deleted; every call site uses `formatDuration` or `formatRuntimeOf`.
+  - `now` is component state refreshed each minute, so a title opens on its release date without a reload.
+- **`src/lib/content.ts`** still exports the old helper names, but they only forward to the engine. `tests/unit/characterisation.test.ts` is untouched and passes, which is the proof that the engine gives the old answers for watched-only states.
+- **`scripts/reset-users.mjs`** clears `skips` too, and skips any table an older database does not have yet.
+
+*The seven bugs.* Each has a regression test in `tests/api/progress.test.ts` against a temp database, numbered as in the package text. A replica of the pre-1.3 server code in `tests/unit/engine-properties.test.ts` is compared with the new reducer one step at a time over about 3,000 random steps: the two agree everywhere except fixes 1, 2 and 6, and the test checks that those differences really occur.
+
+*Decisions that go beyond the text above. Later packages should know these.*
+1. **The un-watch cascade runs only when the title goes from satisfied to unsatisfied.** §4.4 says "if the title is then not satisfied". Taken literally, un-ticking one more episode of an already unfinished series would wipe the out-of-order rows of its dependents, which this package says must never be deleted automatically. For every state the rules can produce the two readings are identical.
+2. **`import` retries waiting rows until nothing more is accepted.** A single pass in timestamp order is not enough: a title watched while its prerequisite was skipped is older than the prerequisite's rows if that prerequisite was watched later, so the first pass rejected it and a second import accepted it. The random-sequence test found this. Rows rejected only for ordering are now tried again, which makes the result independent of row order and a repeated import a no-op.
+3. **Skipping a fully watched title does nothing** (a skip there would end at once).
+4. **`formatDuration(0)` is `"0m"`**, not "TBD", so "time left" reads correctly when nothing is left. "TBD" is for an unknown value; `formatRuntimeOf` maps the catalogue's 0 (unknown runtime) to "TBD".
+5. **Stats leave an unpublished series out of every count**, not only units and runtime. The MCU tab therefore shows 139 episodes and 20 seasons (it was 149 and 21), and reaches 100%. `totalUnits` excludes skipped units; `remainingUnits`, `remainingEpisodes`, `skippedUnits`, `skippedRuntime`, `skippedTitles`, `ratio` and `complete` are new.
+6. **A series with an unpublished episode list is not drawn as locked.** The server refuses to tick it (`pending`), as §4.4 requires. On screen it keeps its old look (episode rows disabled, "metadata pending"): the components use a small `visibleLock` helper that ignores the `pending` kind. The legacy `isUnlocked` in `content.ts` does the same, which is why the characterisation snapshots did not change.
+7. **Unknown-id queries.** `unskip` of a title the catalogue does not know is `unknown-title`; stored skips for such titles stay in the database untouched.
+
+*A problem in the local database client, and what was done about it.*
+- **What happens.** With `libsql` 0.5.29 (the local `file:` driver under `@libsql/client` 0.18; a remote Turso database is not affected), a `transaction("write")` that fails with SQLITE_BUSY leaves a statement open on its pooled connection. Until that statement is garbage-collected, every later transaction on the connection fails at COMMIT ("cannot commit transaction - SQL statements in progress"), and a plain `INSERT` on it reported success but its row was gone afterwards. Reproduced outside the app with two clients on one file.
+- **Consequence.** On a local file a busy error cannot be repaired by retrying, so §4.5's "retry SQLITE_BUSY up to three times" only helps a remote database. The retry is still there for that case.
+- **Fix 1, inside one process:** `src/lib/write-lock.ts`. `withWriteLock(client, run)` queues interactive write transactions on a local database so two never overlap; it does nothing for a remote database. The queue lives on `globalThis` because dev reloads and the test runner can load the module more than once. `progress-store.ts` and `migrations.ts` both use it.
+- **Fix 2, between processes:** `src/lib/db.ts` creates the client with `timeout: 3000` (the client's busy timeout; remote clients ignore it), so a write waits for another process's lock instead of failing. A test starts a second process that holds the write lock for 400 ms and checks the write waits and commits.
+- **Effect on 0.5.** Migration starters in one process are now queued, so the 0.5 note "with retries switched off, 15 of 20 starters fail with SQLITE_BUSY" no longer describes what happens in-process.
+- **What is still open.** A plain single-statement write (creating or deleting a session, creating a user) is not queued. On a local file it can still hit SQLITE_BUSY if it runs while another request's transaction is open. In one process that needs two requests resuming from the same pending promise, in practice two writes arriving during the very first `ensureDatabase()` after start-up. **Package 1.4 reworks those writers and should route them through `withWriteLock`.**
+- Not reported to the library's maintainers; that is the owner's call.
+
+*Other notes.*
+- This client enforces foreign keys on local files (a test insert for a missing user failed). The plan's rule stands: do not rely on `ON DELETE CASCADE`; `skips` has no foreign key and is cleared explicitly.
+- `tests/e2e/helpers.ts` still seeds through the old POST body on purpose, so that path stays exercised.
+
+*Tests.* `npm test`: 174 passed in 7 files.
+- `tests/unit/engine.test.ts` (55): the §4.7 rows for Watch, Unwatch, Skip, Bulk, Stats and Unrecognised rows, plus import, release dates and formatting.
+- `tests/unit/engine-properties.test.ts` (3): random sequences (every reachable state valid, episodes a 1..n prefix, input never mutated, diff exact), merging two reachable states, and the comparison with the pre-1.3 replica.
+- `tests/api/progress.test.ts` (32): the seven regressions, persistence (diff-only writes, atomic rollback after an injected failure, `confirmCleared`, concurrent writes through several clients, a write that waits for another process, unrecognised rows surviving a cascade on their own title) and the route (shapes, old body, 400, 401, 409, generic 500).
+- `tests/api/migrations.test.ts` (24, was 22): updated for version 2; it also checks the shipped version 2 creates the same columns as the plan's definition.
+- `tests/unit/characterisation.test.ts` (10), `catalogue.test.ts` (24), `graph.test.ts` (26): unchanged.
+- New `tests/e2e/out-of-order.spec.ts`: out-of-order rows are labelled and can be removed from the card and from the drawer, at all three sizes. CI still runs only the smoke spec.
+
+**Verification after 1.3, 2026-11-17** (scratch databases only):
+- lint: 0 errors (same one warning); typecheck: clean; `npm test`: 174 passed, six runs in a row;
+- `npm run build`: OK; `npm run catalogue:check`: 12 titles, unchanged;
+- `npx playwright test`: 9 passed (smoke, screens, out-of-order) with layout numbers identical to the baseline; the smoke spec also passes with `CI=true`;
+- screenshots looked at for the changed text: runtimes now read "124h 14m", "2h 06m", "1h 00m";
+- `scripts/reset-users.mjs` run against a copy of the e2e database and against a database without a `skips` table;
+- `marvel-vault.db`: same SHA-256, size and modified time as at the 1.2 check; `public/watch-links.csv` untouched.
+
+**Owner step before deploying 1.3.** Migration 2 is the first one that changes a table that holds data. Before the first production deploy: back up the production database, run this build once against a copy, and confirm the `users`, `sessions` and `progress` row counts are unchanged (the step described under 0.5).
+
+**1.4 Account security hardening** (Opus, 2026-11-22), with one owner change: **sessions never expire.**
+
+*What exists now.*
+- **`src/lib/http.ts`.**
+  - `assertSameOrigin(request)` throws a 403 `RuleError` (`code: "cross-origin"`) when `Origin` is present and its host differs from the request host (first `x-forwarded-host`, else `host`, else the URL's host). `Origin: null` is refused; a request without `Origin` is allowed.
+  - `RuleError(status, code, message, { extra, headers })`; `jsonError`; `errorResponse(error, context, fallback)`, which turns a `RuleError` into its own reply and logs anything else as a generic 500.
+  - `clientIp(request)`: first `x-forwarded-for` entry, else `x-real-ip`, else `"unknown"`.
+- **`src/lib/rate-limit.ts` and migration 3** (`rate_limits`, exactly as §4.3).
+  - `hitLimit` is one atomic upsert with `RETURNING` per check. `enforceLimits` counts every listed bucket and throws 429 with `Retry-After` (seconds) and "Too many attempts. Try again in N minutes." `clearLimit` and `deleteEndedWindows` complete the set.
+  - Limits as written: login 8 per 15 min per username and 40 per 15 min per IP; signup 5 per hour per IP; recover 5 per hour per username (defined for 1.5).
+  - Every attempt counts, including successful ones and malformed sign-ups; a successful sign-in clears its username's bucket.
+- **`src/lib/passwords.ts`.** `newPasswordSchema` (8–72 characters, for signup now and for recover and change-password in 1.5), `hashPassword` (cost 12), and `verifyPassword`, which always runs bcrypt. With no such user it compares against a fixed cost-12 dummy hash, so the response time does not reveal whether a username exists.
+- **Routes.** `login`, `signup`, `logout` and `POST /api/progress` call `assertSameOrigin` first. Login applies both limits, then always runs bcrypt; on success it clears the username bucket, tidies forgotten sessions and ended rate-limit windows, then creates the session. Signup applies the IP limit, validates with `newPasswordSchema`, and answers a taken username with 409 `username-taken`. The sign-in form keeps accepting short existing passwords; the sign-up form's `minLength` is 8.
+- **Headers** (`next.config.ts`, all paths):
+  - The no-nonce CSP from the bundled guide plus `connect-src 'self'; worker-src 'self'; manifest-src 'self'`, with `'unsafe-eval'` in development only. `upgrade-insecure-requests` is left out in development, where it would rewrite `http://localhost` loads.
+  - `X-Content-Type-Options`, `X-Frame-Options: DENY`, `Referrer-Policy`, `Permissions-Policy`.
+  - `Strict-Transport-Security: max-age=63072000; includeSubDomains` in production builds only.
+- **Write lock.** Every remaining single-statement write (session create, extend, delete and tidy; user create; rate-limit upserts and deletes) now goes through `withWriteLock`, as the 1.3 record asked. Only reads are left outside it.
+- **`scripts/reset-users.mjs`** also clears `rate_limits`.
+
+*Sessions never expire (owner change).*
+- **The constraint.** Chrome and Edge keep a cookie for at most 400 days (a later `Max-Age` is cut to 400), so a cookie cannot literally last forever.
+- **Server side.** `getSession` never refuses a session for its age: a session is valid while its row exists.
+- **Cookie and row.** Both are set for 400 days at sign-in. `extendSession(session, response)` pushes both back to 400 days when the last extension was more than a day ago, so there is at most one write per session per day. It runs on every `GET /api/progress`, which the app calls on each load, and only ever in a route handler.
+- **Tidying.** `sessions.expires_at` now means "the browser will have dropped the cookie by then". Sign-in deletes rows more than a day past it (`deleteForgottenSessions`); those cookies can no longer exist.
+- **Result.** A user is signed out only by signing out, by clearing browser data, or by not opening the app for more than 400 days.
+- **Existing sessions.** Pre-1.4 sessions (30-day rows and cookies) keep working and are upgraded to 400 days on their next app load.
+- **Rollback.** A rollback to pre-1.4 code is safe: it reads `expires_at` as an expiry, and extended rows are far in the future.
+
+*Tests.*
+- **`tests/api/auth.test.ts` (20):**
+  - rate limits: the 9th wrong sign-in is 429 with `Retry-After`; the window ends; a success clears the count; 40 per IP; 5 sign-ups per IP; IP header precedence;
+  - sign-in: the dummy hash is used for an unknown username at the same cost; a short legacy password still signs in; a malformed body is 400;
+  - sign-up: a 7-character password is 400, 8 and 72 are accepted, 73 is refused; a taken username is 409;
+  - same origin: a cross-origin POST is 403 on all four routes and writes nothing; own origin, no `Origin` and Vercel's forwarded host are allowed; `null` and another port are refused;
+  - sessions: 400-day cookie at sign-up and sign-in; an old session is accepted and extended; extension happens at most once a day; a pre-1.4 session is upgraded; sign-out still ends the session; tidying removes only rows past the grace;
+  - an unexpected failure is a generic 500.
+- The file sets a 60 s test timeout because it runs real cost-12 bcrypt (about 0.25 s per check).
+- `tests/api/migrations.test.ts` now expects versions 1–3 and checks the shipped version 3 against the plan's definition.
+- **Browser tests.** The screens and smoke specs fail on any CSP violation (console messages and `securitypolicyviolation` events); a probe page confirmed the detector catches real violations. Each browser test now uses its own client IP through `x-forwarded-for` (`useOwnClientIp` in `tests/e2e/helpers.ts`), because one full run creates 9 accounts and sign-up allows 5 per IP per hour.
+
+**Verification after 1.4, 2026-11-22** (scratch databases only):
+- lint: 0 errors (same one warning); typecheck: clean; `npm test`: 194 passed, three runs in a row; `npm run build`: OK.
+- `curl -I` against `next start` shows the CSP, `X-Content-Type-Options`, `X-Frame-Options`, `Referrer-Policy`, `Permissions-Policy` and `Strict-Transport-Security`. A cross-origin POST to `/api/auth/login` returns 403.
+- `npx playwright test`: 9 passed on the dev server and 9 passed on a production build (`next start`, production CSP); layout numbers unchanged; no CSP violations. Smoke spec with `CI=true`: passed.
+- `scripts/reset-users.mjs` against a copy of the e2e database: all five tables emptied.
+- Not checked on Vercel: the headers and the CSP on the real domain. That is part of the owner's pre-deploy trial run (`KNOWN_GAPS.md` A1).

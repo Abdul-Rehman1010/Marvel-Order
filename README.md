@@ -65,12 +65,20 @@ Tailwind CSS is installed only for its CSS reset (`@import "tailwindcss"` in `sr
 - Progress checkpoints are counted as `movies + specials + individual episodes`; series are also shown separately as completion containers so every total visibly reconciles.
 - *Doctor Strange in the Multiverse of Madness* additionally requires *X-Men* (2000).
 - Passwords are stored as bcrypt hashes; session cookies are HTTP-only.
+
+## Accounts and sign-in
+
+- **New passwords need 8 to 72 characters.** Accounts created earlier with a shorter password can still sign in.
+- **Sessions do not expire.** The app holds no confidential data, so nobody is signed out for being away. The session cookie lasts 400 days, the longest browsers allow, and every visit pushes it back to the full 400 days. You only need to sign in again after more than 400 days without opening the app, after clearing your browser data, or after signing out.
+- **Attempts are limited.** Sign-in allows 8 attempts per username and 40 per IP address every 15 minutes, and sign-up allows 5 new accounts per IP address per hour. Going over returns "Too many attempts" with how long to wait. A successful sign-in resets that username's count.
+- **Requests from other sites are refused.** Every request that changes data must come from the app's own address.
+- **Security headers.** The site sends a Content Security Policy and the usual protective headers (see `next.config.ts`).
 - Every indexed entry has a locally cached, optimized vertical poster and widescreen backdrop, so artwork is stable during local use and after deployment.
 - Every movie card includes a researched, spoiler-free premise; optional entries are explicitly marked as safe to skip and never gate required progress.
 
 ## Reset all users and progress
 
-To remove every user account, active session, and watched-progress record while preserving the database schema and the complete movie/show catalogue, run:
+To remove every user account, active session, watched-progress record and skipped-title record while preserving the database schema and the complete movie/show catalogue, run:
 
 ```bash
 npm run db:reset-users
@@ -91,7 +99,7 @@ TURSO_DATABASE_URL=libsql://your-database-name.turso.io
 TURSO_AUTH_TOKEN=your-token
 ```
 
-4. Deploy. Tables are initialized automatically on first request.
+4. Deploy. Tables are created and upgraded automatically on the first request (see `src/lib/migrations.ts`). Back up the database before deploying a build that adds a migration.
 
 The production build uses Node.js route handlers for password hashing, sessions, database access, and server-authoritative progression checks.
 

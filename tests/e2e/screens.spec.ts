@@ -11,7 +11,7 @@ import path from "node:path";
 
 import { expect, test, type Page, type TestInfo } from "@playwright/test";
 
-import { markWatchedViaApi, settle, signUpViaApi, uniqueUsername } from "./helpers";
+import { markWatchedViaApi, settle, signUpViaApi, uniqueUsername, useOwnClientIp, watchCspViolations } from "./helpers";
 
 const SEED = [
   // Nine MCU films, in release order.
@@ -106,6 +106,9 @@ async function closeDialogWithEscape(page: Page, name: string | RegExp) {
 }
 
 test("baseline screenshots and layout numbers", async ({ page }, testInfo) => {
+  await useOwnClientIp(page, testInfo);
+  // Every screen below is checked: the list must still be empty at the end.
+  const cspViolations = watchCspViolations(page);
   const shots = shotWriter(testInfo);
 
   // 1. Sign-in screen (signed out).
@@ -176,4 +179,6 @@ test("baseline screenshots and layout numbers", async ({ page }, testInfo) => {
   await page.keyboard.press("l");
   await expect(page.getByRole("dialog", { name: "Doom Flix guide" })).toBeVisible();
   await shots.take(page, "08-lore-guide");
+
+  expect(cspViolations, "Content Security Policy violations").toEqual([]);
 });

@@ -8,14 +8,14 @@ import {
   CONTENT_BY_ID,
   MCU_CONTENT,
   getPrerequisiteChain,
-  itemComplete,
   type ContentItem,
 } from "@/lib/content";
+import { isWatchedComplete, type ViewingIndex } from "@/lib/engine/state";
 import { backdropUrl, posterUrl } from "@/lib/media";
 import { POSTER_TINTS, DEFAULT_TINT } from "@/lib/poster-tints";
 
 export type LoreSceneProps = {
-  watched: Set<string>;
+  viewing: ViewingIndex;
   doomsdayPercent: number;
   remainingSeconds: number;
   daysLeft: number;
@@ -64,7 +64,7 @@ export function IntroScene() {
 }
 
 /* ---------- 1. Release order ---------- */
-export function OrderScene({ watched }: LoreSceneProps) {
+export function OrderScene({ viewing }: LoreSceneProps) {
   const phaseOne = useMemo(() => MCU_CONTENT.filter((item) => item.phase === "Phase One"), []);
   return (
     <div className="lore-scene lore-scene-strip">
@@ -74,7 +74,7 @@ export function OrderScene({ watched }: LoreSceneProps) {
             <Poster item={item} sizes="130px" />
             <div className="lore-strip-tag">
               <span className="lore-strip-number">{String(index + 1).padStart(2, "0")}</span>
-              {itemComplete(item, watched) && <span className="lore-strip-check"><Check size={12} /></span>}
+              {isWatchedComplete(item, viewing) && <span className="lore-strip-check"><Check size={12} /></span>}
             </div>
             <small>{item.year}</small>
           </div>

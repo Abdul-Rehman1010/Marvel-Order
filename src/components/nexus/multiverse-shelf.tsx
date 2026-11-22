@@ -3,7 +3,8 @@
 import Image from "next/image";
 import { ChevronRight, LockKeyhole } from "lucide-react";
 
-import { isUnlocked, progressKey, type ContentItem, type Universe } from "@/lib/content";
+import type { ContentItem, Universe } from "@/lib/content";
+import { lockReason, watchedUnitCount, type ViewingIndex } from "@/lib/engine/state";
 import { posterUrl } from "@/lib/media";
 
 const UNIVERSE_LABEL: Record<Universe, string> = { mcu: "MCU", xmen: "X-Men", street: "Street" };
@@ -16,12 +17,15 @@ type ShelfEntry =
 export function MultiverseShelf({
   nextByUniverse,
   inProgressSeries,
-  watched,
+  viewing,
+  now,
   onOpenItem,
 }: {
   nextByUniverse: Partial<Record<Universe, ContentItem>>;
   inProgressSeries: ContentItem[];
-  watched: Set<string>;
+  viewing: ViewingIndex;
+  /** The clock release locks are checked against (epoch milliseconds). */
+  now: number;
   onOpenItem: (item: ContentItem) => void;
 }) {
   const entries: ShelfEntry[] = [
@@ -31,7 +35,7 @@ export function MultiverseShelf({
     ...inProgressSeries.map((item) => ({
       kind: "progress" as const,
       item,
-      watchedEpisodes: item.episodes?.filter((episode) => watched.has(progressKey(item.id, episode.id))).length ?? 0,
+      watchedEpisodes: watchedUnitCount(item, viewing),
       totalEpisodes: item.episodes?.length ?? 0,
     })),
   ];
@@ -43,7 +47,8 @@ export function MultiverseShelf({
       <p className="eyebrow">ACROSS THE MULTIVERSE</p>
       <div className="shelf-row">
         {entries.map((entry) => {
-          const locked = entry.kind === "next" && !isUnlocked(entry.item, watched);
+          const lock = entry.kind === "next" ? lockReason(entry.item, viewing, now) : null;
+          const locked = lock !== null && lock.kind !== "pending";
           return (
             <button key={`${entry.kind}-${entry.item.id}`} className="shelf-card" onClick={() => onOpenItem(entry.item)}>
               <span className="shelf-poster">

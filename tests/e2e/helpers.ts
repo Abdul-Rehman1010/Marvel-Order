@@ -1,3 +1,5 @@
+import { createHash } from "node:crypto";
+
 import type { APIRequestContext, Page, TestInfo } from "@playwright/test";
 
 export const TEST_PASSWORD = "e2e-password-1";
@@ -6,6 +8,40 @@ export const TEST_PASSWORD = "e2e-password-1";
 export function uniqueUsername(testInfo: TestInfo) {
   const project = testInfo.project.name.replace(/[^a-z0-9]/gi, "").slice(0, 4);
   return `e2e-${project}-${Date.now().toString(36)}${Math.random().toString(36).slice(2, 5)}`.slice(0, 24);
+}
+
+/**
+ * Makes every request of this test (page loads, fetches and `page.request` calls) come from its
+ * own client IP. Sign-up is limited to 5 per hour per IP (package 1.4), and one full run creates
+ * more accounts than that from the same machine. The server reads the IP from `x-forwarded-for`,
+ * which Vercel sets in production; locally the test can set it. Call it first in each test.
+ */
+export async function useOwnClientIp(page: Page, testInfo: TestInfo) {
+  const digest = createHash("sha256").update(`${testInfo.testId}:${testInfo.retry}:${Date.now()}`).digest();
+  const ip = `10.${digest[0]}.${digest[1]}.${digest[2]}`;
+  await page.context().setExtraHTTPHeaders({ "x-forwarded-for": ip });
+}
+
+/**
+ * Records every Content Security Policy violation the page reports, from the browser console and
+ * from `securitypolicyviolation` events. Call before the first navigation; assert the list is
+ * empty at the end of the test.
+ */
+export function watchCspViolations(page: Page) {
+  const violations: string[] = [];
+  page.on("console", (message) => {
+    const text = message.text();
+    if (/Content Security Policy|Refused to (load|execute|apply|connect|frame|create)/i.test(text)) violations.push(text);
+  });
+  page.on("pageerror", (error) => {
+    if (/Content Security Policy/i.test(error.message)) violations.push(error.message);
+  });
+  void page.addInitScript(() => {
+    document.addEventListener("securitypolicyviolation", (event) => {
+      console.error(`Content Security Policy violation: ${event.violatedDirective} blocked ${event.blockedURI}`);
+    });
+  });
+  return violations;
 }
 
 /** Creates an account through the API; the session cookie lands in the request's cookie jar. */

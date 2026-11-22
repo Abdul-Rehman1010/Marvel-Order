@@ -1,8 +1,10 @@
 import { expect, test } from "@playwright/test";
 
-import { TEST_PASSWORD, uniqueUsername } from "./helpers";
+import { TEST_PASSWORD, uniqueUsername, useOwnClientIp, watchCspViolations } from "./helpers";
 
 test("sign up, mark Iron Man, reload, un-watch, sign out", async ({ page }, testInfo) => {
+  await useOwnClientIp(page, testInfo);
+  const cspViolations = watchCspViolations(page);
   const username = uniqueUsername(testInfo);
 
   // Sign up from the sign-in screen.
@@ -41,4 +43,6 @@ test("sign up, mark Iron Man, reload, un-watch, sign out", async ({ page }, test
   await expect(page.getByRole("heading", { name: "Resume your mission" })).toBeVisible();
   await page.reload();
   await expect(page.getByRole("heading", { name: "Resume your mission" })).toBeVisible();
+
+  expect(cspViolations, "Content Security Policy violations").toEqual([]);
 });

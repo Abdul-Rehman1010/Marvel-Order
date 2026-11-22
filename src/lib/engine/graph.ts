@@ -39,6 +39,12 @@ export type PrerequisiteGraph = {
   prerequisiteChain(id: string): string[];
   /** Every title that transitively depends on `id`, in catalogue order. */
   dependents(id: string): string[];
+  /**
+   * Position of `id` in graph order: prerequisites always come before their dependents, and
+   * the earlier release date (then catalogue position) goes first among titles that are free
+   * to be ordered either way. `Infinity` for an unknown id, so unknown ids sort last.
+   */
+  rank(id: string): number;
   /** The fewest edges with the same reachability (for the timeline map in 5.3). */
   reducedEdges(): GraphEdge[];
 };
@@ -104,11 +110,34 @@ export function buildGraph(
   const ids = items.map((item) => item.id);
   const ancestorSets = new Map(items.map((item) => [item.id, new Set(ancestors.get(item.id))]));
 
+  // GRAPH ORDER: a topological order. Among the titles whose prerequisites are all placed,
+  // take the earliest release date; catalogue position breaks a tie.
+  const rank = new Map<string, number>();
+  const waiting = items.map((item, index) => ({ item, index }));
+  while (waiting.length) {
+    let best = -1;
+    for (let position = 0; position < waiting.length; position += 1) {
+      const candidate = waiting[position];
+      if (!direct.get(candidate.item.id)!.every((id) => rank.has(id))) continue;
+      if (
+        best === -1 ||
+        candidate.item.releaseDate < waiting[best].item.releaseDate ||
+        (candidate.item.releaseDate === waiting[best].item.releaseDate && candidate.index < waiting[best].index)
+      ) {
+        best = position;
+      }
+    }
+    // The graph is acyclic, so some waiting title always has every prerequisite placed.
+    rank.set(waiting[best].item.id, rank.size);
+    waiting.splice(best, 1);
+  }
+
   return {
     ids,
     directPrerequisites: (id) => [...(direct.get(id) ?? [])],
     prerequisiteChain: (id) => (byId.has(id) ? [...ancestors.get(id)!, id] : []),
     dependents: (id) => [...(descendants.get(id) ?? [])],
+    rank: (id) => rank.get(id) ?? Number.POSITIVE_INFINITY,
     reducedEdges: () =>
       ids.flatMap((to) => {
         const parents = direct.get(to)!;
@@ -155,6 +184,16 @@ export function prerequisiteChain(id: string): string[] {
 /** Every title that cannot be watched before `id`, in catalogue order. */
 export function dependents(id: string): string[] {
   return GRAPH.dependents(id);
+}
+
+/** Every transitive prerequisite of `id` in watch order (the chain without the title itself). */
+export function ancestors(id: string): string[] {
+  return GRAPH.prerequisiteChain(id).slice(0, -1);
+}
+
+/** Position in graph order (prerequisites first, then release date). Unknown ids sort last. */
+export function graphRank(id: string): number {
+  return GRAPH.rank(id);
 }
 
 /** Transitive reduction of the graph: the edges a map needs to draw. */

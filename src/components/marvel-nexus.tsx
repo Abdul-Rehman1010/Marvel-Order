@@ -40,16 +40,25 @@ import {
   STREET_CONTENT,
   UNIVERSE_CONTENT,
   XMEN_CONTENT,
-  formatRuntime,
-  isUnlocked,
-  itemComplete,
-  itemUnits,
-  missingPrerequisite,
-  progressKey,
-  unlockReason,
   type ContentItem,
   type Universe,
 } from "@/lib/content";
+import { formatDuration, formatLockReason, formatRuntimeOf } from "@/lib/engine/format";
+import {
+  EMPTY_STATE,
+  indexOf,
+  isOutstanding,
+  isWatchedComplete,
+  lockReason,
+  missingPrerequisite,
+  outOfOrderTitles,
+  progressKey,
+  watchedUnitCount,
+  type ProgressRow,
+  type ViewingIndex,
+  type ViewingState,
+} from "@/lib/engine/state";
+import { getStats } from "@/lib/engine/stats";
 import { normalizeWatchTitle, parseWatchLinksCsv, type WatchLinkCatalogue } from "@/lib/watch-links";
 import { backdropUrl, posterUrl } from "@/lib/media";
 import { useDialogBehavior, useGlassSpotlight, usePointerTilt } from "@/lib/use-motion";
@@ -65,10 +74,9 @@ import { LoreExperience } from "@/components/nexus/lore-experience";
 import { InstallAppButton } from "@/components/nexus/install-app";
 
 type User = { id: string; username: string };
-type ProgressRecord = { contentId: string; episode: number };
 type RequirementFilter = "all" | "doomsday" | "optional";
 type FormatFilter = "all" | "movie" | "series" | "special";
-type PendingUnwatch = { item: ContentItem; episode: number; newerRecords: ProgressRecord[] };
+type PendingUnwatch = { item: ContentItem; episode: number; newerRecords: ProgressRow[] };
 export type NexusApiRequest = (path: string, init?: RequestInit) => Promise<Response>;
 
 const browserApiRequest: NexusApiRequest = (path, init) => fetch(path, init);
@@ -81,6 +89,21 @@ const INTRO_SLIDES = [
   { label: "CROSS-PLATFORM ARCHIVE", title: "Your mission continues on web and mobile" },
 ] as const;
 
+
+/**
+ * The lock the cards and drawer show: an unfinished prerequisite or a release date still ahead.
+ * A series whose episode list is not published yet ("pending") is not drawn as locked; its
+ * episode rows are disabled instead, as before.
+ */
+function visibleLock(item: ContentItem, index: ViewingIndex, now: number) {
+  const lock = lockReason(item, index, now);
+  return lock && lock.kind !== "pending" ? lock : null;
+}
+
+/** The viewing state from an API reply, tolerating a missing field. */
+function readState(payload: { state?: Partial<ViewingState> }): ViewingState {
+  return { rows: payload.state?.rows ?? [], skips: payload.state?.skips ?? [] };
+}
 
 function dateLabel(value: string) {
   return new Intl.DateTimeFormat("en-US", {
@@ -232,7 +255,7 @@ function AuthScreen({ onAuthenticated, request }: { onAuthenticated: (isNewAccou
           </div>
           <form onSubmit={submit}>
             <label>Operator name<input name="username" autoComplete="username" placeholder="e.g. watcher_616" required minLength={3} maxLength={24} /></label>
-            <label>Access key<span className="password-field"><input name="password" type={showPassword ? "text" : "password"} autoComplete={mode === "signup" ? "new-password" : "current-password"} placeholder="Enter password" required minLength={4} maxLength={72} /><button type="button" onClick={() => setShowPassword((value) => !value)} aria-label={showPassword ? "Hide password" : "Show password"}>{showPassword ? <EyeOff size={17} /> : <Eye size={17} />}</button></span></label>
+            <label>Access key<span className="password-field"><input name="password" type={showPassword ? "text" : "password"} autoComplete={mode === "signup" ? "new-password" : "current-password"} placeholder="Enter password" required minLength={mode === "signup" ? 8 : 1} maxLength={72} /><button type="button" onClick={() => setShowPassword((value) => !value)} aria-label={showPassword ? "Hide password" : "Show password"}>{showPassword ? <EyeOff size={17} /> : <Eye size={17} />}</button></span></label>
             {error && <div className="form-error"><Zap size={14} /> {error}</div>}
             <button className="primary-action" disabled={busy} type="submit">
               {busy ? "Establishing link…" : mode === "signup" ? "Initialize profile" : "Enter Doom Flix"}
@@ -252,81 +275,19 @@ function AuthScreen({ onAuthenticated, request }: { onAuthenticated: (isNewAccou
   );
 }
 
-function getStats(items: ContentItem[], watched: Set<string>, includeOptional = false, percentByRuntime = false) {
-  const trackedItems = includeOptional ? items : items.filter((item) => item.required);
-  const totalUnits = trackedItems.reduce((sum, item) => sum + itemUnits(item), 0);
-  let watchedUnits = 0;
-  let remainingRuntime = 0;
-  let watchedRuntime = 0;
-  let totalEpisodes = 0;
-  let watchedEpisodes = 0;
-
-  for (const item of trackedItems) {
-    if (item.kind === "series") {
-      for (const episode of item.episodes ?? []) {
-        totalEpisodes += 1;
-        if (watched.has(progressKey(item.id, episode.id))) {
-          watchedUnits += 1;
-          watchedEpisodes += 1;
-          watchedRuntime += episode.runtimeSec;
-        } else {
-          remainingRuntime += episode.runtimeSec;
-        }
-      }
-    } else if (watched.has(progressKey(item.id))) {
-      watchedUnits += 1;
-      watchedRuntime += item.runtimeSec;
-    } else {
-      remainingRuntime += item.runtimeSec;
-    }
-  }
-
-  const movies = trackedItems.filter((item) => item.kind === "movie");
-  const watchedMovies = movies.filter((item) => itemComplete(item, watched)).length;
-  const seriesItems = trackedItems.filter((item) => item.kind === "series");
-  const watchedSeries = seriesItems.filter((item) => itemComplete(item, watched)).length;
-  const specials = trackedItems.filter((item) => item.kind === "special");
-  const watchedSpecials = specials.filter((item) => itemComplete(item, watched)).length;
-  const totalRuntime = watchedRuntime + remainingRuntime;
-  const progressRatio = percentByRuntime
-    ? (totalRuntime ? watchedRuntime / totalRuntime : 0)
-    : (totalUnits ? watchedUnits / totalUnits : 0);
-
-  return {
-    percent: totalUnits ? (watchedUnits === totalUnits ? 100 : Math.min(99, Math.round(progressRatio * 100))) : 0,
-    totalUnits,
-    watchedUnits,
-    remainingRuntime,
-    watchedRuntime,
-    movies: movies.length,
-    watchedMovies,
-    series: seriesItems.length,
-    watchedSeries,
-    specials: specials.length,
-    watchedSpecials,
-    totalEpisodes,
-    watchedEpisodes,
-    pendingRuntime: trackedItems.some((item) => item.dataPending),
-  };
-}
-
-function toWatchedSet(progress: ProgressRecord[]) {
-  return new Set(progress.map((record) => progressKey(record.contentId, record.episode)));
-}
-
 function universeLabel(universe: Universe) {
   return universe === "mcu" ? "MCU" : universe === "xmen" ? "X-Men" : "Street-Level Saga";
 }
 
 /** Titles that flip from locked to unlocked once `item` is marked watched — for the "new transmission unlocked" toast. */
-function detectNewlyUnlocked(item: ContentItem, oldWatched: Set<string>, newWatched: Set<string>) {
-  return CONTENT.filter((candidate) => candidate.id !== item.id && !isUnlocked(candidate, oldWatched) && isUnlocked(candidate, newWatched));
+function detectNewlyUnlocked(item: ContentItem, oldIndex: ViewingIndex, newIndex: ViewingIndex, now: number) {
+  return CONTENT.filter((candidate) => candidate.id !== item.id && visibleLock(candidate, oldIndex, now) !== null && visibleLock(candidate, newIndex, now) === null);
 }
 
 /** Phase/universe/Doomsday completions that flip to true once `item` is marked watched — for the milestone celebration. */
-function detectMilestones(item: ContentItem, oldWatched: Set<string>, newWatched: Set<string>): DelightToastInput[] {
+function detectMilestones(item: ContentItem, oldIndex: ViewingIndex, newIndex: ViewingIndex): DelightToastInput[] {
   const milestones: DelightToastInput[] = [];
-  const justCompleted = (items: ContentItem[]) => items.length > 0 && !items.every((candidate) => itemComplete(candidate, oldWatched)) && items.every((candidate) => itemComplete(candidate, newWatched));
+  const justCompleted = (items: ContentItem[]) => items.length > 0 && !items.every((candidate) => isWatchedComplete(candidate, oldIndex)) && items.every((candidate) => isWatchedComplete(candidate, newIndex));
 
   if (item.universe === "mcu") {
     const phaseItems = MCU_CONTENT.filter((candidate) => candidate.phase === item.phase && candidate.required);
@@ -393,7 +354,9 @@ function WatchSource({
 function TimelineCard({
   item,
   index,
-  watched,
+  viewing,
+  now,
+  outOfOrder,
   busy,
   onOpen,
   onOpenPrerequisite,
@@ -402,8 +365,12 @@ function TimelineCard({
   watchLinksLoaded,
 }: {
   item: ContentItem;
+  /** Position in the universe list (the sequence number on the poster). */
   index: number;
-  watched: Set<string>;
+  viewing: ViewingIndex;
+  now: number;
+  /** Watched while a prerequisite is unfinished (left behind by an old bug). Stays removable. */
+  outOfOrder: boolean;
   busy: boolean;
   onOpen: () => void;
   onOpenPrerequisite: (item: ContentItem) => void;
@@ -411,11 +378,12 @@ function TimelineCard({
   watchUrl?: string;
   watchLinksLoaded: boolean;
 }) {
-  const complete = itemComplete(item, watched);
-  const unlocked = isUnlocked(item, watched);
-  const reason = unlockReason(item, watched);
-  const prerequisite = missingPrerequisite(item, watched);
-  const episodeWatched = item.episodes?.filter((episode) => watched.has(progressKey(item.id, episode.id))).length ?? 0;
+  const complete = isWatchedComplete(item, viewing);
+  const lock = visibleLock(item, viewing, now);
+  const unlocked = lock === null;
+  const reason = lock ? formatLockReason(item, lock) : null;
+  const prerequisite = lock?.kind === "prerequisite" ? lock.item : null;
+  const episodeWatched = item.kind === "series" ? watchedUnitCount(item, viewing) : 0;
   const tiltRef = usePointerTilt<HTMLButtonElement>(5);
 
   return (
@@ -437,12 +405,12 @@ function TimelineCard({
           <span className={`type-badge ${item.required ? "required" : "optional"}`}>{item.required ? "Required" : "Optional · Safe to skip"}</span>
           {item.recommendation && <span className="goated-badge"><Star size={12} fill="currentColor" /> DEV PICK</span>}
         </div>
-        <div className="card-meta"><span>{dateLabel(item.releaseDate)}</span><i /><span>{item.kind === "series" ? `${item.episodes?.length ?? 0} episodes` : formatRuntime(item.runtimeSec).replace(" 00s", "")}</span></div>
+        <div className="card-meta"><span>{dateLabel(item.releaseDate)}</span><i /><span>{item.kind === "series" ? `${item.episodes?.length ?? 0} episodes` : formatRuntimeOf(item.runtimeSec)}</span></div>
         <h3>{item.title}</h3>
         <p className="card-phase">{item.phase}</p>
         <p className="card-summary">{item.summary}</p>
-        <div className={`card-availability ${unlocked ? "ready" : "locked"}`} aria-label={unlocked ? `${item.title} is ready to watch` : `Locked: ${reason}`}>
-          <span>{unlocked ? <Check size={14} /> : <LockKeyhole size={14} />}{unlocked ? "Ready to watch" : "Locked"}</span>
+        <div className={`card-availability ${unlocked ? "ready" : "locked"}`} aria-label={unlocked ? `${item.title} is ready to watch` : outOfOrder ? `Watched out of order: ${reason}` : `Locked: ${reason}`}>
+          <span>{unlocked ? <Check size={14} /> : <LockKeyhole size={14} />}{unlocked ? "Ready to watch" : outOfOrder ? "Watched out of order" : "Locked"}</span>
           {!unlocked && prerequisite && <button title={`Open ${prerequisite.title}`} onClick={() => onOpenPrerequisite(prerequisite)}><span>Open {prerequisite.title}</span><ChevronRight size={14} /></button>}
         </div>
         {!item.required && <p className="optional-note">Optional entry · excluded from Doomsday readiness</p>}
@@ -452,7 +420,7 @@ function TimelineCard({
             <span>{complete ? "Season complete" : `${episodeWatched}/${item.episodes?.length ?? 0} episodes`}</span><ChevronRight size={16} />
           </button>
         ) : (
-          <button className="card-action" disabled={!unlocked || busy} onClick={() => onToggle(item, -1, !complete)}>
+          <button className="card-action" disabled={busy || (!complete && !unlocked)} onClick={() => onToggle(item, -1, !complete)}>
             <span>{busy ? "Syncing…" : complete ? "Watched" : unlocked ? "Mark watched" : "Complete prerequisite"}</span>{complete ? <Check size={16} /> : unlocked ? <Play size={15} /> : <LockKeyhole size={15} />}
           </button>
         )}
@@ -463,11 +431,13 @@ function TimelineCard({
 
 function PrerequisiteChain({
   item,
-  watched,
+  viewing,
+  now,
   onOpenPrerequisite,
 }: {
   item: ContentItem;
-  watched: Set<string>;
+  viewing: ViewingIndex;
+  now: number;
   onOpenPrerequisite: (item: ContentItem) => void;
 }) {
   const [expanded, setExpanded] = useState(false);
@@ -475,9 +445,9 @@ function PrerequisiteChain({
   const focusRef = useRef<HTMLLIElement>(null);
   const chain = useMemo(() => getPrerequisiteChain(item), [item]);
   const prerequisites = chain.slice(0, -1);
-  const next = missingPrerequisite(item, watched);
-  const selectedUnlocked = isUnlocked(item, watched);
-  const completedPrerequisites = prerequisites.filter((candidate) => itemComplete(candidate, watched)).length;
+  const next = missingPrerequisite(item, viewing);
+  const selectedUnlocked = visibleLock(item, viewing, now) === null;
+  const completedPrerequisites = prerequisites.filter((candidate) => isWatchedComplete(candidate, viewing)).length;
   const nextIndex = next ? chain.findIndex((candidate) => candidate.id === next.id) : -1;
   const previewStart = nextIndex >= 0 ? nextIndex : Math.max(0, chain.length - 3);
   const previewRows = chain.slice(previewStart, previewStart + 3);
@@ -521,14 +491,12 @@ function PrerequisiteChain({
       <div ref={scrollRef} className={`viewing-path-scroll ${expanded ? "expanded" : "collapsed"}`}>
         <ol id={listId} className="viewing-path-list">
           {visibleRows.map((chainItem) => {
-            const complete = itemComplete(chainItem, watched);
+            const complete = isWatchedComplete(chainItem, viewing);
             const selected = chainItem.id === item.id;
             const watchNext = chainItem.id === next?.id;
             const scheduled = selected && !next && !selectedUnlocked;
             const tone = complete || (selected && selectedUnlocked) ? "complete" : scheduled ? "scheduled" : "pending";
-            const watchedEpisodes = chainItem.kind === "series"
-              ? chainItem.episodes?.filter((episode) => watched.has(progressKey(chainItem.id, episode.id))).length ?? 0
-              : 0;
+            const watchedEpisodes = chainItem.kind === "series" ? watchedUnitCount(chainItem, viewing) : 0;
             const status = selected
               ? complete ? "Watched" : selectedUnlocked ? "Ready to watch" : scheduled ? "Scheduled" : "Locked"
               : complete ? "Watched" : watchNext ? "Watch next" : "Still required";
@@ -582,7 +550,9 @@ function PrerequisiteChain({
 
 function DetailDrawer({
   item,
-  watched,
+  viewing,
+  now,
+  outOfOrder,
   busyKey,
   onClose,
   onOpenPrerequisite,
@@ -591,7 +561,10 @@ function DetailDrawer({
   watchLinksLoaded,
 }: {
   item: ContentItem;
-  watched: Set<string>;
+  viewing: ViewingIndex;
+  now: number;
+  /** Watched while a prerequisite is unfinished (left behind by an old bug). Stays removable. */
+  outOfOrder: boolean;
   busyKey: string | null;
   onClose: () => void;
   onOpenPrerequisite: (item: ContentItem) => void;
@@ -599,10 +572,12 @@ function DetailDrawer({
   watchUrl?: string;
   watchLinksLoaded: boolean;
 }) {
-  const complete = itemComplete(item, watched);
-  const unlocked = isUnlocked(item, watched);
-  const reason = unlockReason(item, watched);
-  const prerequisite = missingPrerequisite(item, watched);
+  const watched = viewing.watched;
+  const complete = isWatchedComplete(item, viewing);
+  const lock = visibleLock(item, viewing, now);
+  const unlocked = lock === null;
+  const reason = lock ? formatLockReason(item, lock) : null;
+  const prerequisite = lock?.kind === "prerequisite" ? lock.item : null;
   const dialogRef = useDialogBehavior(onClose);
   const titleId = `details-${item.id}-title`;
   const episodeUnlocked = (index: number, episode: NonNullable<typeof item.episodes>[number]) => {
@@ -629,25 +604,26 @@ function DetailDrawer({
         <div className="drawer-content">
           {!item.required && <div className="optional-explainer"><Star size={18} /><div><strong>OPTIONAL TRANSMISSION</strong><p>This entry is available for completionists, but skipping it will not lock any required movie or series.</p></div></div>}
           {item.recommendation && <div className="developer-pick"><Star size={19} fill="currentColor" /><div><strong>DEVELOPER&apos;S RECOMMENDATION</strong><p>{item.recommendation}</p></div></div>}
-          <PrerequisiteChain item={item} watched={watched} onOpenPrerequisite={onOpenPrerequisite} />
+          <PrerequisiteChain item={item} viewing={viewing} now={now} onOpenPrerequisite={onOpenPrerequisite} />
           {!prerequisite && !unlocked && <div className="scheduled-alert"><Clock3 size={18} /><div><strong>SCHEDULED RELEASE</strong><p>{reason}</p></div></div>}
+          {outOfOrder && prerequisite && <div className="scheduled-alert"><Zap size={18} /><div><strong>WATCHED OUT OF ORDER</strong><p>You have progress here, but {prerequisite.title} is not finished. You can keep this progress or remove it.</p></div></div>}
           <p className="drawer-summary">{item.summary}</p>
           <div className="lore-brief"><span><Orbit size={16} /> CONTINUITY BRIEF</span><p>{item.lore}</p></div>
 
           {item.kind === "series" && (
             <section className="episode-section">
-              <div className="section-heading"><div><p className="eyebrow">EPISODE MATRIX</p><h3>Season progress</h3></div><span>{item.episodes?.filter((episode) => watched.has(progressKey(item.id, episode.id))).length ?? 0}/{item.episodes?.length ?? 0}</span></div>
+              <div className="section-heading"><div><p className="eyebrow">EPISODE MATRIX</p><h3>Season progress</h3></div><span>{watchedUnitCount(item, viewing)}/{item.episodes?.length ?? 0}</span></div>
               <div className="episode-list">
                 {(item.episodes ?? []).map((episode, index) => {
                   const checked = watched.has(progressKey(item.id, episode.id));
                   const rowUnlocked = episodeUnlocked(index, episode);
                   const key = progressKey(item.id, episode.id);
                   return (
-                    <button key={episode.id} className={`episode-row ${checked ? "checked" : ""}`} disabled={!rowUnlocked || busyKey === key || item.dataPending} onClick={() => onToggle(item, episode.id, !checked)}>
+                    <button key={episode.id} className={`episode-row ${checked ? "checked" : ""}`} disabled={busyKey === key || (!checked && (!rowUnlocked || Boolean(item.dataPending)))} onClick={() => onToggle(item, episode.id, !checked)}>
                       <span className="episode-check">{checked ? <Check size={15} /> : rowUnlocked && !item.dataPending ? <Play size={13} /> : <LockKeyhole size={13} />}</span>
                       <span className="episode-number">E{String(episode.id).padStart(2, "0")}</span>
                       <span className="episode-name">{item.dataPending ? `Episode ${episode.id} — metadata pending` : episode.title}</span>
-                      <span className="episode-runtime">{episode.runtimeSec ? formatRuntime(episode.runtimeSec).replace("00h ", "").replace(" 00s", "") : "TBD"}</span>
+                      <span className="episode-runtime">{formatRuntimeOf(episode.runtimeSec)}</span>
                     </button>
                   );
                 })}
@@ -658,7 +634,7 @@ function DetailDrawer({
         <div className={`drawer-command-bar ${item.kind === "series" && !nextEpisode ? "single" : ""}`}>
           <WatchSource item={item} url={watchUrl} loaded={watchLinksLoaded} unlocked={unlocked} placement="drawer" />
           {item.kind !== "series" && (
-            <button className="primary-action drawer-action" disabled={!unlocked || busyKey === progressKey(item.id)} onClick={() => onToggle(item, -1, !complete)}>
+            <button className="primary-action drawer-action" disabled={busyKey === progressKey(item.id) || (!complete && !unlocked)} onClick={() => onToggle(item, -1, !complete)}>
               {complete ? "Remove watched status" : unlocked ? "Mark as watched" : "Complete prerequisite first"}{complete ? <X size={17} /> : <Check size={17} />}
             </button>
           )}
@@ -707,7 +683,10 @@ function UnwatchConfirmation({
 
 export default function MarvelNexus({ request = browserApiRequest }: { request?: NexusApiRequest }) {
   const [user, setUser] = useState<User | null>(null);
-  const [progress, setProgress] = useState<ProgressRecord[]>([]);
+  const [viewingState, setViewingState] = useState<ViewingState>(EMPTY_STATE);
+  // The clock the release locks are checked against. Refreshed each minute so a title opens on
+  // its release date without a reload.
+  const [now, setNow] = useState(() => Date.now());
   const [databaseMode, setDatabaseMode] = useState("TIMELINE VAULT");
   const [loading, setLoading] = useState(true);
   const [universe, setUniverse] = useState<Universe>("mcu");
@@ -737,13 +716,13 @@ export default function MarvelNexus({ request = browserApiRequest }: { request?:
       const response = await request("/api/progress", { cache: "no-store" });
       if (response.status === 401) {
         setUser(null);
-        setProgress([]);
+        setViewingState(EMPTY_STATE);
         return;
       }
       const payload = await response.json();
       if (!response.ok) throw new Error(payload.error ?? "The local timeline vault is unavailable.");
       setUser(payload.user);
-      setProgress(payload.progress ?? []);
+      setViewingState(readState(payload));
       setDatabaseMode(payload.databaseMode ?? "TIMELINE VAULT");
     } catch {
       setLoadError("The local timeline vault is unavailable.");
@@ -764,11 +743,11 @@ export default function MarvelNexus({ request = browserApiRequest }: { request?:
       .then(({ response, payload }) => {
         if (response.status === 401) {
           setUser(null);
-          setProgress([]);
+          setViewingState(EMPTY_STATE);
         } else {
           if (!response.ok) throw new Error(payload.error ?? "The local timeline vault is unavailable.");
           setUser(payload.user);
-          setProgress(payload.progress ?? []);
+          setViewingState(readState(payload));
           setDatabaseMode(payload.databaseMode ?? "TIMELINE VAULT");
         }
         setLoading(false);
@@ -797,11 +776,17 @@ export default function MarvelNexus({ request = browserApiRequest }: { request?:
     return () => controller.abort();
   }, []);
 
-  const watched = useMemo(() => new Set(progress.map((record) => progressKey(record.contentId, record.episode))), [progress]);
+  useEffect(() => {
+    const timer = window.setInterval(() => setNow(Date.now()), 60_000);
+    return () => window.clearInterval(timer);
+  }, []);
+
+  const viewing = useMemo(() => indexOf(viewingState), [viewingState]);
+  const outOfOrder = useMemo(() => new Set(outOfOrderTitles(viewingState)), [viewingState]);
   const items = universe === "mcu" ? MCU_CONTENT : universe === "xmen" ? XMEN_CONTENT : STREET_CONTENT;
   const itemIndexById = useMemo(() => new Map(items.map((entry, index) => [entry.id, index])), [items]);
-  const trackStats = useMemo(() => getStats(items, watched, true, true), [items, watched]);
-  const doomsdayStats = useMemo(() => getStats([...MCU_CONTENT, ...XMEN_CONTENT], watched, false, true), [watched]);
+  const trackStats = useMemo(() => getStats(items, viewing, { includeOptional: true }), [items, viewing]);
+  const doomsdayStats = useMemo(() => getStats([...MCU_CONTENT, ...XMEN_CONTENT], viewing), [viewing]);
   const visibleItems = items.filter((item) => {
     if (requirementFilter === "doomsday") return item.required && item.universe !== "street";
     if (requirementFilter === "optional") return !item.required;
@@ -810,22 +795,22 @@ export default function MarvelNexus({ request = browserApiRequest }: { request?:
     if (formatFilter !== "all") return item.kind === formatFilter;
     return true;
   }).filter((item) => {
-    if (unwatchedOnly) return !itemComplete(item, watched);
+    if (unwatchedOnly) return isOutstanding(item, viewing);
     return true;
   }).filter((item) => item.title.toLocaleLowerCase().includes(searchQuery.trim().toLocaleLowerCase()));
-  const nextRequired = items.find((item) => item.required && !itemComplete(item, watched));
-  const nextUnlocked = items.find((item) => item.required && !itemComplete(item, watched) && isUnlocked(item, watched));
+  const nextRequired = items.find((item) => item.required && isOutstanding(item, viewing));
+  const nextUnlocked = items.find((item) => item.required && isOutstanding(item, viewing) && visibleLock(item, viewing, now) === null);
   const nextByUniverse = useMemo<Partial<Record<Universe, ContentItem>>>(() => ({
-    mcu: MCU_CONTENT.find((candidate) => candidate.required && !itemComplete(candidate, watched)),
-    xmen: XMEN_CONTENT.find((candidate) => candidate.required && !itemComplete(candidate, watched)),
-    street: STREET_CONTENT.find((candidate) => candidate.required && !itemComplete(candidate, watched)),
-  }), [watched]);
+    mcu: MCU_CONTENT.find((candidate) => candidate.required && isOutstanding(candidate, viewing)),
+    xmen: XMEN_CONTENT.find((candidate) => candidate.required && isOutstanding(candidate, viewing)),
+    street: STREET_CONTENT.find((candidate) => candidate.required && isOutstanding(candidate, viewing)),
+  }), [viewing]);
   const inProgressSeries = useMemo(() => CONTENT.filter((candidate) => {
     if (candidate.kind !== "series") return false;
     const total = candidate.episodes?.length ?? 0;
-    const done = candidate.episodes?.filter((episode) => watched.has(progressKey(candidate.id, episode.id))).length ?? 0;
+    const done = watchedUnitCount(candidate, viewing);
     return done > 0 && done < total;
-  }).slice(0, 6), [watched]);
+  }).slice(0, 6), [viewing]);
 
   function pushDelightToast(toast: DelightToastInput, ttlMs = 5600) {
     delightIdRef.current += 1;
@@ -847,28 +832,28 @@ export default function MarvelNexus({ request = browserApiRequest }: { request?:
       const response = await request("/api/progress", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ contentId: item.id, episode, watched: value }),
+        body: JSON.stringify({ action: { type: value ? "watch" : "unwatch", contentId: item.id, episode } }),
       });
       const payload = await response.json();
       if (!response.ok) throw new Error(payload.error ?? "Timeline update rejected.");
-      const newProgress: ProgressRecord[] = payload.progress ?? [];
-      setProgress(newProgress);
+      const newState = readState(payload);
+      setViewingState(newState);
 
       if (value) {
-        const newWatched = toWatchedSet(newProgress);
+        const newViewing = indexOf(newState);
         const unitSeconds = item.kind === "series" && episode > 0
           ? item.episodes?.find((candidate) => candidate.id === episode)?.runtimeSec ?? 0
           : item.runtimeSec;
         if (unitSeconds > 0) {
           const countsTowardDoomsday = item.required && item.universe !== "street";
-          const amount = formatRuntime(unitSeconds).replace(" 00s", "");
+          const amount = formatDuration(unitSeconds);
           pushDelightToast({ kind: "checkpoint", title: "Checkpoint secured", detail: countsTowardDoomsday ? `${amount} closer to Doomsday` : `${amount} logged in your archive` });
         }
-        const revealed = detectNewlyUnlocked(item, watched, newWatched);
+        const revealed = detectNewlyUnlocked(item, viewing, newViewing, now);
         if (revealed.length) {
           pushDelightToast({ kind: "unlock", item: revealed[0], more: revealed.length - 1 }, 6800);
         }
-        for (const milestone of detectMilestones(item, watched, newWatched)) {
+        for (const milestone of detectMilestones(item, viewing, newViewing)) {
           pushDelightToast(milestone, 7200);
         }
       }
@@ -882,9 +867,10 @@ export default function MarvelNexus({ request = browserApiRequest }: { request?:
 
   function toggle(item: ContentItem, episode: number, value: boolean) {
     if (!value) {
-      const recordIndex = progress.findIndex((record) => record.contentId === item.id && record.episode === episode);
-      if (recordIndex >= 0 && recordIndex < progress.length - 1) {
-        setPendingUnwatch({ item, episode, newerRecords: progress.slice(recordIndex + 1) });
+      const rows = viewingState.rows;
+      const recordIndex = rows.findIndex((record) => record.contentId === item.id && record.episode === episode);
+      if (recordIndex >= 0 && recordIndex < rows.length - 1) {
+        setPendingUnwatch({ item, episode, newerRecords: rows.slice(recordIndex + 1) });
         return;
       }
     }
@@ -903,7 +889,7 @@ export default function MarvelNexus({ request = browserApiRequest }: { request?:
       const response = await request("/api/auth/logout", { method: "POST" });
       if (!response.ok) throw new Error("Logout failed");
       setUser(null);
-      setProgress([]);
+      setViewingState(EMPTY_STATE);
     } catch {
       setNotice("Could not close the local session. Try again.");
     }
@@ -1000,8 +986,9 @@ export default function MarvelNexus({ request = browserApiRequest }: { request?:
   if (!user) return <AuthScreen onAuthenticated={handleAuthenticated} request={request} />;
 
   const activeHero = nextUnlocked ?? nextRequired ?? items.at(-1)!;
-  const doomsdayComplete = doomsdayStats.watchedUnits === doomsdayStats.totalUnits;
-  const daysUntilDoomsday = Math.max(0, Math.ceil((DOOMSDAY.getTime() - Date.now()) / 86400000));
+  const doomsdayComplete = doomsdayStats.complete;
+  const daysUntilDoomsday = Math.max(0, Math.ceil((DOOMSDAY.getTime() - now) / 86400000));
+  const nextRequiredLock = nextRequired ? visibleLock(nextRequired, viewing, now) : null;
 
   return (
     <main className="app-shell" data-universe={universe}>
@@ -1050,7 +1037,7 @@ export default function MarvelNexus({ request = browserApiRequest }: { request?:
             <ProgressReactor value={doomsdayStats.percent} tone="global" />
             <div className="status-copy"><div className="status-label"><p className="eyebrow">UNIVERSAL DOOMSDAY READINESS</p><span>GLOBAL</span></div><h2>{doomsdayComplete ? "Doomsday protocol complete" : "Mission in progress"}</h2><p>{doomsdayStats.movies} movies + {doomsdayStats.specials} specials + {doomsdayStats.totalEpisodes} episodes · required checkpoints</p><CheckpointCounts watched={doomsdayStats.watchedUnits} total={doomsdayStats.totalUnits} /></div>
           </div>
-          <div className="metric-card runtime-card doomsday-runtime glass-panel"><Clock3 size={22} /><div><span className="scope-pill">GLOBAL</span><small>DOOMSDAY WATCH TIME LEFT</small><strong>{formatRuntime(doomsdayStats.remainingRuntime)}</strong><em>MCU + X-MEN REQUIRED ONLY{doomsdayStats.pendingRuntime ? " · PLUS UNRELEASED RUNTIME" : ""}</em>
+          <div className="metric-card runtime-card doomsday-runtime glass-panel"><Clock3 size={22} /><div><span className="scope-pill">GLOBAL</span><small>DOOMSDAY WATCH TIME LEFT</small><strong>{formatDuration(doomsdayStats.remainingRuntime)}</strong><em>MCU + X-MEN REQUIRED ONLY{doomsdayStats.pendingRuntime ? " · PLUS UNRELEASED RUNTIME" : ""}</em>
             <PacePlanner remainingSeconds={doomsdayStats.remainingRuntime} daysLeft={daysUntilDoomsday} complete={doomsdayComplete} />
           </div></div>
         </section>
@@ -1071,9 +1058,9 @@ export default function MarvelNexus({ request = browserApiRequest }: { request?:
             <div className="counter-cell"><Film size={18} /><div><small>MOVIES</small><strong>{trackStats.watchedMovies}<span> / {trackStats.movies}</span></strong></div></div>
             <div className="counter-cell"><Tv size={18} /><div><small>SEASONS</small><strong>{trackStats.watchedSeries}<span> / {trackStats.series}</span></strong></div></div>
             <div className="counter-cell"><Star size={18} /><div><small>SPECIALS</small><strong>{trackStats.watchedSpecials}<span> / {trackStats.specials}</span></strong></div></div>
-            <div className="counter-cell"><Layers3 size={18} /><div><small>EPISODES LEFT</small><strong>{trackStats.totalEpisodes - trackStats.watchedEpisodes}</strong></div></div>
+            <div className="counter-cell"><Layers3 size={18} /><div><small>EPISODES LEFT</small><strong>{trackStats.remainingEpisodes}</strong></div></div>
           </div>
-          <div className={`metric-card runtime-card local-runtime ${universe} glass-panel`}><Clock3 size={19} /><div><small>{universe === "mcu" ? "MCU TIME LEFT" : universe === "xmen" ? "X-MEN TIME LEFT" : "STREET SAGA TIME LEFT"}</small><strong>{formatRuntime(trackStats.remainingRuntime)}</strong><em>LOCAL ARCHIVE • OPTIONAL INCLUDED{trackStats.pendingRuntime ? " • PLUS UNRELEASED RUNTIME" : ""}</em></div></div>
+          <div className={`metric-card runtime-card local-runtime ${universe} glass-panel`}><Clock3 size={19} /><div><small>{universe === "mcu" ? "MCU TIME LEFT" : universe === "xmen" ? "X-MEN TIME LEFT" : "STREET SAGA TIME LEFT"}</small><strong>{formatDuration(trackStats.remainingRuntime)}</strong><em>LOCAL ARCHIVE • OPTIONAL INCLUDED{trackStats.pendingRuntime ? " • PLUS UNRELEASED RUNTIME" : ""}</em></div></div>
         </section>
 
         <section className="next-operation glass-panel">
@@ -1082,10 +1069,10 @@ export default function MarvelNexus({ request = browserApiRequest }: { request?:
               <Image src={posterUrl(nextRequired)} alt={`${nextRequired.title} poster`} fill sizes="64px" />
             </button>
           ) : <div className="operation-signal"><span /><Radio size={17} /></div>}
-          <div className="operation-copy"><p className="eyebrow">NEXT REQUIRED CHECKPOINT</p><h3>{nextRequired?.title ?? "Current archive complete"}</h3><p>{nextRequired ? (isUnlocked(nextRequired, watched) ? "Cleared for viewing. Continue when ready." : unlockReason(nextRequired, watched)) : doomsdayComplete ? "You are ready for Avengers: Doomsday." : `${universe === "mcu" ? "MCU" : universe === "xmen" ? "X-Men" : "Street-Level"} archive complete. Continue the other required archive to finish Doomsday readiness.`}</p></div>
+          <div className="operation-copy"><p className="eyebrow">NEXT REQUIRED CHECKPOINT</p><h3>{nextRequired?.title ?? "Current archive complete"}</h3><p>{nextRequired ? (nextRequiredLock ? formatLockReason(nextRequired, nextRequiredLock) : "Cleared for viewing. Continue when ready.") : doomsdayComplete ? "You are ready for Avengers: Doomsday." : `${universe === "mcu" ? "MCU" : universe === "xmen" ? "X-Men" : "Street-Level"} archive complete. Continue the other required archive to finish Doomsday readiness.`}</p></div>
           {nextRequired && <button onClick={() => setSelected(nextRequired)}>OPEN FILE <ChevronRight size={15} /></button>}
         </section>
-        <MultiverseShelf nextByUniverse={nextByUniverse} inProgressSeries={inProgressSeries} watched={watched} onOpenItem={openArchiveItem} />
+        <MultiverseShelf nextByUniverse={nextByUniverse} inProgressSeries={inProgressSeries} viewing={viewing} now={now} onOpenItem={openArchiveItem} />
         </section>
       </section>
 
@@ -1115,7 +1102,9 @@ export default function MarvelNexus({ request = browserApiRequest }: { request?:
               <TimelineCard
                 item={item}
                 index={itemIndexById.get(item.id) ?? 0}
-                watched={watched}
+                viewing={viewing}
+                now={now}
+                outOfOrder={outOfOrder.has(item.id)}
                 busy={busyKey === progressKey(item.id)}
                 onOpen={() => setSelected(item)}
                 onOpenPrerequisite={openArchiveItem}
@@ -1131,10 +1120,10 @@ export default function MarvelNexus({ request = browserApiRequest }: { request?:
 
       <footer><div className="brand-lockup compact"><div className="brand-mark"><span>D</span></div><div><strong>DOOM FLIX</strong><small>WATCH PROTOCOL</small></div></div><p>Personal viewing archive • Release-order spoiler protection active</p><span><Database size={14} /> {CONTENT.length} transmissions indexed</span></footer>
 
-      {selected && <DetailDrawer key={selected.id} item={selected} watched={watched} busyKey={busyKey} onClose={() => setSelected(null)} onOpenPrerequisite={openArchiveItem} onToggle={toggle} watchUrl={watchCatalogue.links.get(normalizeWatchTitle(selected.title))} watchLinksLoaded={watchCatalogue.loaded} />}
+      {selected && <DetailDrawer key={selected.id} item={selected} viewing={viewing} now={now} outOfOrder={outOfOrder.has(selected.id)} busyKey={busyKey} onClose={() => setSelected(null)} onOpenPrerequisite={openArchiveItem} onToggle={toggle} watchUrl={watchCatalogue.links.get(normalizeWatchTitle(selected.title))} watchLinksLoaded={watchCatalogue.loaded} />}
       {loreOpen && (
         <LoreExperience
-          watched={watched}
+          viewing={viewing}
           doomsdayPercent={doomsdayStats.percent}
           remainingSeconds={doomsdayStats.remainingRuntime}
           daysLeft={daysUntilDoomsday}
@@ -1146,7 +1135,8 @@ export default function MarvelNexus({ request = browserApiRequest }: { request?:
       {paletteOpen && (
         <CommandPalette
           onClose={() => setPaletteOpen(false)}
-          watched={watched}
+          viewing={viewing}
+          now={now}
           onOpenItem={openArchiveItem}
           onSelectUniverse={selectUniverse}
           onOpenLore={() => setLoreOpen(true)}

@@ -4,6 +4,7 @@ import { ArrowLeft } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode, type Ref, type RefCallback } from "react";
 
 import type { ContentItem } from "@/lib/content";
+import type { ViewingIndex } from "@/lib/engine/state";
 import { useDialogBehavior, useHistoryClose, usePrefersReducedMotion, useSwipeToDismiss } from "@/lib/use-motion";
 import { LORE_SCENES, type LoreChapterId, type LoreSceneProps } from "@/components/nexus/lore-scenes";
 
@@ -119,7 +120,7 @@ function mergeRefs<T>(...refs: Array<Ref<T> | undefined>): RefCallback<T> {
 }
 
 export function LoreExperience({
-  watched,
+  viewing,
   doomsdayPercent,
   remainingSeconds,
   daysLeft,
@@ -127,7 +128,7 @@ export function LoreExperience({
   onOpenItem,
   onExit,
 }: {
-  watched: Set<string>;
+  viewing: ViewingIndex;
   doomsdayPercent: number;
   remainingSeconds: number;
   daysLeft: number;
@@ -310,8 +311,8 @@ export function LoreExperience({
   );
 
   const sceneData: SceneData = useMemo(
-    () => ({ watched, doomsdayPercent, remainingSeconds, daysLeft, nextUp, onOpenItem: handleOpenItem }),
-    [watched, doomsdayPercent, remainingSeconds, daysLeft, nextUp, handleOpenItem],
+    () => ({ viewing, doomsdayPercent, remainingSeconds, daysLeft, nextUp, onOpenItem: handleOpenItem }),
+    [viewing, doomsdayPercent, remainingSeconds, daysLeft, nextUp, handleOpenItem],
   );
 
   const activeChapter = CHAPTERS[activeChapterIndex];
