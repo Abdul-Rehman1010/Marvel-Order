@@ -2,7 +2,7 @@ import { createClient } from "@libsql/client";
 import { expect, test } from "@playwright/test";
 
 import { E2E_DATABASE_URL } from "../../playwright.config";
-import { signUpViaApi, uniqueUsername, useOwnClientIp } from "./helpers";
+import { signUpViaApi, uniqueUsername, useOwnClientIp, waitForSync } from "./helpers";
 
 /**
  * Before package 1.3 an un-watch could leave rows behind for titles whose prerequisite was no
@@ -61,7 +61,8 @@ test("progress left out of order is labelled and can be removed", async ({ page 
   await expect(episodes.nth(0)).not.toHaveClass(/checked/);
   await expect(drawer.getByText("WATCHED OUT OF ORDER")).toBeHidden();
 
-  // Both removals were saved.
+  // Both removals were saved (in the background, so wait for that first).
+  await waitForSync(page);
   const after = await (await page.request.get("/api/progress")).json();
   expect(after.outOfOrder).toEqual([]);
   expect(after.state.rows).toEqual([]);

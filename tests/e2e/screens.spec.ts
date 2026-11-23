@@ -11,7 +11,7 @@ import path from "node:path";
 
 import { expect, test, type Page, type TestInfo } from "@playwright/test";
 
-import { markWatchedViaApi, settle, signUpViaApi, TEST_PASSWORD, uniqueUsername, useOwnClientIp, watchCspViolations } from "./helpers";
+import { markWatchedViaApi, settle, signUpViaApi, TEST_PASSWORD, uniqueUsername, useOwnClientIp, waitForSync, watchCspViolations } from "./helpers";
 
 const SEED = [
   // Nine MCU films, in release order.
@@ -192,8 +192,33 @@ test("baseline screenshots and layout numbers", async ({ page }, testInfo) => {
   // 10. A new recovery code, made from the panel.
   await panel.getByLabel("Current password").fill(TEST_PASSWORD);
   await panel.getByRole("button", { name: "Make a new recovery code" }).click();
-  await expect(page.getByRole("alertdialog", { name: "Your new recovery code" })).toBeVisible();
+  const codeDialog = page.getByRole("alertdialog", { name: "Your new recovery code" });
+  await expect(codeDialog).toBeVisible();
   await shots.take(page, "10-recovery-code");
+  await codeDialog.getByLabel("I have saved this code somewhere safe").check();
+  await codeDialog.getByRole("button", { name: "Continue" }).click();
+  await expect(codeDialog).toBeHidden();
+  await closeDialogWithEscape(page, username);
+
+  // 11. Un-watch confirmation (package 2.1): Iron Man has eight later films watched, which would go with it.
+  await page.getByRole("tab", { name: "MCU timeline" }).click();
+  await page.locator("#timeline-item-iron-man").getByRole("button", { name: "Watched", exact: true }).click();
+  const confirmation = page.getByRole("alertdialog", { name: "Remove later progress too?" });
+  await expect(confirmation.getByRole("listitem")).toHaveCount(8);
+  await shots.take(page, "11-unwatch-confirmation");
+  await confirmation.getByRole("button", { name: "Keep watched" }).click();
+  await expect(confirmation).toBeHidden();
+
+  // 12. A tick that cannot be saved yet: on screen at once, with the saving dot, the Undo toast and
+  // the offline chip. Then the connection comes back and it is saved.
+  await page.route("**/api/progress", (route) => (route.request().method() === "POST" ? route.abort("internetdisconnected") : route.continue()));
+  await page.locator("#timeline-item-guardians-1").getByRole("button", { name: "Mark watched", exact: true }).click();
+  await expect(page.getByText("Offline — changes will sync")).toBeVisible();
+  await expect(page.locator("#timeline-item-guardians-1 .card-action")).toHaveAttribute("data-saving", "true");
+  await shots.take(page, "12-offline-tick");
+  await page.unroute("**/api/progress");
+  await page.evaluate(() => window.dispatchEvent(new Event("online")));
+  await waitForSync(page);
 
   expect(cspViolations, "Content Security Policy violations").toEqual([]);
 });

@@ -386,7 +386,7 @@ Titles in `code` are catalogue ids. "Full account" means every released unit wat
 - Move `detectNewlyUnlocked` / `detectMilestones` to the engine. `dispatch` returns `{ before, after }` viewing indexes captured **before** the optimistic update is applied; toasts are computed from that pair. (Computing them from component state after an optimistic update would compare the new state with itself and never fire.)
 - Toasts for every action type: watch (as today, plus Undo); skip ("Skipped — later titles unlocked" when any were); bulk and catch-up get **one** summary toast that lists all milestones reached, since the existing stack keeps only one toast per kind.
 - Tests: reducer-fold unit tests (pending actions survive a slow response; retries are idempotent; with five actions queued and the second rejected, the independent ones still sync, only the rejected one and those that depended on it are removed, and the message names each of them). E2E: tick three titles rapidly, all persist after reload; throttle the network and confirm the tick shows immediately.
-- [ ] Acceptance: tests green; no code path awaits the server before updating the UI.
+- [x] Acceptance: tests green; no code path awaits the server before updating the UI. *(Done 2026-11-24: 48 new unit tests, including the three reducer-fold cases, and 6 new browser tests at all three sizes pass; every progress change goes through `dispatch`, which updates the screen before anything is sent. See the 2.1 record.)*
 
 #### 2.2 Skipped state
 - Depends on 2.1. Wire `skip` / `unskip` end to end (table from migration 2).
@@ -883,3 +883,71 @@ Each package appends here when it is done: what changed, anything that differs f
 - lint: 0 errors (same one warning); typecheck: clean; `npm test`: 226 passed; `npm run build`: OK; `npx playwright test`: 33 passed on the dev server (not repeated on a production build; nothing here touches headers or scripts, and the dashboard test checks for CSP violations).
 - Layout at 1440 / 1366 / 390: first card top 1,325 / 1,325 / 2,184 px (was 1,379 / 1,379 / 2,242); page height 12,585 / 12,607 / 24,024 px; text under 11 px 26 / 26 / 32 nodes (was 29 / 29 / 35); no horizontal overflow. Compare later runs with these numbers.
 - `marvel-vault.db`, `public/watch-links.csv` and `src/lib/watch-links.ts` untouched.
+
+### M2 — Fast start, fast flow (in progress: 2.1 done on 2026-11-24)
+
+**2.1 Client progress store: instant ticks, Undo, accurate confirmations** (Opus, 2026-11-24). The unit tests for the queue were written before the store, as §8 asks when this package runs on Opus.
+
+*What exists now.*
+- **`src/lib/client/gateway.ts`**: `ProgressGateway { load(signal?), send(action, confirmCleared?) }` and `createRemoteGateway(request)` (the seam the `request` prop provided; 4.1 adds the local one).
+  - A gateway never throws. Every reply becomes `ok`, `confirm-required`, `rejected` (409, 400 and 403; it carries the state when the body has one), `signed-out` (401) or `unavailable` (network failure, 5xx, 408, 429, or a 200 whose body is not the API's).
+  - Saves are sent with `keepalive: true`, so the request in flight finishes even if the tab is closed right after a tick.
+  - `load()` also returns the user, the storage mode and the recovery-code flag the dashboard shows.
+- **`src/lib/client/outbox.ts`** (pure): `OutboxEntry` (the action, its dispatch time and, for an un-watch, `confirmCleared`); `applyEntry` (the reducer plus the server's `confirmCleared` rule); `foldOutbox` (what the UI shows); `recheckOutbox` (after a refusal); `pendingKeysOf`, `isUnitPending` and `isTitlePending` (the saving indicator).
+- **`src/lib/client/use-progress.ts`**: `createProgressStore(gateway)` holds `confirmed` and the outbox and runs one drain loop exactly as §4.6 lists: 200, `confirm-required`, any other refusal (only that action is dropped, the rest of the queue is re-checked in order, one event names everything removed), 401, and network failure or 5xx (queue kept, `status: "offline"`, retries after 2 s, 5 s, 15 s, then every 60 s).
+  - `dispatch(action, { confirmCleared })` checks the action with the reducer, shows it at once, queues it, and returns `{ before, after }` viewing indexes captured before the optimistic update. Toasts are computed from that pair.
+  - `useProgress(gateway)` wraps the store with `useSyncExternalStore` and adds the browser wiring: it retries at once on the `online` event and when the tab becomes visible, and warns before the tab is closed or reloaded while anything is unsaved (`beforeunload`, registered only then).
+- **`src/lib/engine/milestones.ts`**: `newlyUnlocked(before, after, now)` and `milestonesReached(before, after)`, moved out of `marvel-nexus.tsx` and generalised to any action, bulk included.
+- **`src/lib/client/feedback.ts`** (pure): `actionToasts` for every action type; `unwatchImpact` and `needsConfirmation` for the un-watch question; `describeAction`, `rejectionNotice` and `removedNotice` for the messages.
+- **`marvel-nexus.tsx`** no longer owns `progress`, `busyKey` or `persistToggle`.
+  - Buttons are never disabled while saving. A unit with a queued change shows a small pulsing dot (`data-saving` on the card action, episode row or drawer action).
+  - While the server cannot be reached, an "Offline — changes will sync" chip hangs just below the top bar, with a polite screen-reader status. The app shell carries `data-sync="idle" | "saving" | "offline"`; the browser tests wait for "idle" before reloading.
+  - The "Checkpoint secured" toast has Undo for 6 s. It is the matching un-watch, through the same confirmation as any other.
+  - The un-watch confirmation appears only when later episodes or other titles would go too, and lists exactly those (series rows say how many watched episodes go). The cleared ids are sent as `confirmCleared`. A `confirm-required` reply reopens it with the server's list and the line "Progress was added on another device."
+  - A refused action is undone on screen, and one message names it and everything removed with it: "Couldn't save: The Incredible Hulk — needs Iron Man. Also not saved: Iron Man 2, Thor."
+  - Logging out waits up to 4 s for queued changes, and refuses with a message while they cannot be saved.
+- `toast-stack.tsx` renders the Undo button; its toast type is `ToastSpec` from `feedback.ts`.
+
+*Decisions beyond the text above. Later packages should know these.*
+1. **Every un-watch is sent with `confirmCleared`**, empty when nothing else should go. A device that saw nothing to ask about therefore cannot clear another device's progress without the question.
+2. **`dispatch` itself refuses an un-watch that would clear unconfirmed titles** (code `confirm-required`), so no code path can clear progress without asking. An action that changes nothing is not queued.
+3. **Clocks.** The fold applies each entry with its own dispatch time; the re-check after a refusal uses the current time. An entry that no longer applies stays queued but is not drawn; the server refuses it in turn and the user is told then. In the re-check, an un-watch that now needs a fresh confirmation stays queued (the server asks).
+4. **A refusal without a state is never guessed at.** If the state cannot be fetched, nothing is dropped: the store goes offline and repeats the whole step later. A refusal writes nothing, so repeating it is safe.
+5. **403 is a refusal** (that action only, with its message); **408 and 429 are network failures** (retried).
+6. **`newlyUnlocked` is stricter than the old helper.** It skips a series whose episode list is unpublished and any title the action itself watched or skipped. Before, watching VisionQuest's last episode called *Your Friendly Neighborhood Spider-Man S2* "ready to watch".
+7. **A toast for every action type.** Watch and watch-all: "Checkpoint secured" with Undo. Un-watch: "Removed from watched", naming how many later titles were cleared. Skip: "Skipped — later titles unlocked" when any were, otherwise "Skipped {title}". Un-skip: "Skip removed". Bulk: one summary toast listing every milestone. Skip, un-skip, watch-all and bulk have no button yet (2.2, 2.3).
+8. **The checkpoint toast now always appears**, even for a title with an unknown runtime ("{title} logged in your archive"), because it carries Undo.
+9. **Toast placement.**
+   - Phones now show the newest two toasts (they showed one), and the toast with Undo is stacked last, so an "unlocked" toast never hides it.
+   - While offline the stack moves down so the chip stays readable.
+   - An "unlocked" toast whose title is locked again (after an Undo) is removed. A refusal, a fresh confirmation or a sign-out clears every toast, since they may describe a change that was not saved.
+10. **`useOptimistic` is not used.** `02-guides/interactive-apps.md` was read: its optimistic value lasts only while one transition is pending, while this queue has to outlive failed requests, keep its order and be retried.
+11. **Extra files beyond §4.2**: `client/outbox.ts`, `client/feedback.ts` and `engine/milestones.ts`, all pure, so they are tested without React or the network.
+
+*Tests.* `npm test`: 274 passed in 11 files (226 before).
+- `tests/unit/progress-client.test.ts` (34), against a fake server running the same reducer and `confirmCleared` rule:
+  - the fold, the re-check and the saving keys;
+  - a tick shows before the reply; later ticks survive a slow reply and go out one at a time, in order;
+  - `before`/`after` are captured before the optimistic update; refused and no-op actions are not queued;
+  - un-watch confirmation and the empty `confirmCleared`;
+  - **five queued, the second refused**: the independent one still syncs, the refused one and the two that needed it are removed, and the message names all three;
+  - a refusal with a state is not re-fetched; `confirm-required` reopens with the server's list; 401; a late reply after a reset; `whenIdle`;
+  - with fake timers: **a lost reply is retried and changes nothing twice**, the 2 s / 5 s / 15 s / 60 s schedule and `retryNow`, ticks made offline sync in order, and a refusal whose state cannot be fetched is repeated later;
+  - the remote gateway's request (keepalive, body) and its sorting of every reply;
+  - the toasts, the confirmation contents and the messages.
+- `tests/unit/milestones.test.ts` (14): unlocks (including the unpublished series and unreleased titles), and phase, universe, Street-Level and Doomsday milestones, single and bulk.
+- New `tests/e2e/instant-ticks.spec.ts` (6 tests × 3 sizes):
+  - **three quick ticks with every save held back**: each shows at once with the saving dot, only one request is in flight, and all three are saved and survive a reload;
+  - Undo, and the toast's 6 s lifetime (fake clock);
+  - the confirmation appears only when needed and lists exactly what goes, for a movie and for later episodes;
+  - another device's progress brings the confirmation back with the server's list;
+  - offline chip, then sync on the `online` event;
+  - a refused tick is undone and named.
+- Existing specs: smoke and out-of-order now wait for the sync (`waitForSync` in `tests/e2e/helpers.ts`) before reloading or reading the API. The screens spec adds `11-unwatch-confirmation` and `12-offline-tick`.
+
+**Verification after 2.1, 2026-11-24** (scratch databases only):
+- lint: 0 errors (same one warning); typecheck: clean; `npm test`: 274 passed; `npm run build`: OK.
+- `npx playwright test`: 51 passed on the dev server and 51 on a production build (`next start`, production CSP), with no CSP violations.
+- Layout numbers are unchanged from 1.6: first card 1,325 / 1,325 / 2,184 px, page height 12,585 / 12,607 / 24,024 px, text under 11 px 26 / 26 / 32 nodes, no horizontal overflow. The new shots 11 and 12 were looked at at all three sizes.
+- "No code path awaits the server before updating the UI": every progress change goes through `dispatch`, which updates the snapshot before anything is sent. The only awaits left in `marvel-nexus.tsx` are the first load, sign-in and sign-out; the account panel's awaits are not about progress.
+- `marvel-vault.db` is now 102,400 bytes, modified 2026-11-22 21:31, two minutes before the owner's "1.6" commit (it was 94,208 bytes at the 1.6 check). Nothing in this package opened it; the growth fits the owner's dev server applying migrations 3 and 4 (`KNOWN_GAPS.md` A5). `public/watch-links.csv` and `src/lib/watch-links.ts` are untouched.

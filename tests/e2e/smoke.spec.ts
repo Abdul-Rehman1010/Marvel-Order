@@ -1,6 +1,6 @@
 import { expect, test } from "@playwright/test";
 
-import { TEST_PASSWORD, uniqueUsername, useOwnClientIp, watchCspViolations } from "./helpers";
+import { TEST_PASSWORD, uniqueUsername, useOwnClientIp, waitForSync, watchCspViolations } from "./helpers";
 
 test("sign up, mark Iron Man, reload, un-watch, sign out", async ({ page }, testInfo) => {
   await useOwnClientIp(page, testInfo);
@@ -35,13 +35,16 @@ test("sign up, mark Iron Man, reload, un-watch, sign out", async ({ page }, test
   await ironMan().getByRole("button", { name: "Mark watched", exact: true }).click();
   await expect(ironMan().getByRole("button", { name: "Watched", exact: true })).toBeVisible();
 
-  // A reload fetches progress from the server again, so this proves it was saved.
+  // A reload fetches progress from the server again, so this proves it was saved (the tick shows
+  // at once and is saved in the background, so wait for that first).
+  await waitForSync(page);
   await page.reload();
   await expect(ironMan().getByRole("button", { name: "Watched", exact: true })).toBeVisible();
 
-  // Un-watch it (it is the newest checkpoint, so no confirmation appears) and confirm that persists too.
+  // Un-watch it (nothing watched depends on it, so no confirmation appears) and confirm that persists too.
   await ironMan().getByRole("button", { name: "Watched", exact: true }).click();
   await expect(ironMan().getByRole("button", { name: "Mark watched", exact: true })).toBeVisible();
+  await waitForSync(page);
   await page.reload();
   await expect(ironMan().getByRole("button", { name: "Mark watched", exact: true })).toBeVisible();
 

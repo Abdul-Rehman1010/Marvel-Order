@@ -10,6 +10,7 @@ import {
   ChevronUp,
   CircleUserRound,
   Clock3,
+  CloudOff,
   Database,
   Eye,
   EyeOff,
@@ -30,7 +31,7 @@ import {
   X,
   Zap,
 } from "lucide-react";
-import { FormEvent, Fragment, KeyboardEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { FormEvent, Fragment, KeyboardEvent, useCallback, useEffect, useEffectEvent, useMemo, useRef, useState } from "react";
 
 import {
   CONTENT,
@@ -38,15 +39,18 @@ import {
   getPrerequisiteChain,
   MCU_CONTENT,
   STREET_CONTENT,
-  UNIVERSE_CONTENT,
   XMEN_CONTENT,
   type ContentItem,
   type Universe,
 } from "@/lib/content";
+import { actionToasts, needsConfirmation, rejectionNotice, removedNotice, unwatchImpact, type ToastSpec } from "@/lib/client/feedback";
+import { createRemoteGateway, type ApiRequest, type LoadResult } from "@/lib/client/gateway";
+import { isTitlePending, isUnitPending, type PendingKeys } from "@/lib/client/outbox";
+import { useProgress, type SyncEvent } from "@/lib/client/use-progress";
 import { formatDuration, formatLockReason, formatRuntimeOf } from "@/lib/engine/format";
+import type { Action } from "@/lib/engine/reducer";
 import {
   EMPTY_STATE,
-  indexOf,
   isOutstanding,
   isWatchedComplete,
   lockReason,
@@ -54,9 +58,7 @@ import {
   outOfOrderTitles,
   progressKey,
   watchedUnitCount,
-  type ProgressRow,
   type ViewingIndex,
-  type ViewingState,
 } from "@/lib/engine/state";
 import { getStats } from "@/lib/engine/stats";
 import { normalizeWatchTitle, parseWatchLinksCsv, type WatchLinkCatalogue } from "@/lib/watch-links";
@@ -78,8 +80,18 @@ import { RecoveryCodeDialog } from "@/components/nexus/recovery-code-dialog";
 type User = { id: string; username: string };
 type RequirementFilter = "all" | "doomsday" | "optional";
 type FormatFilter = "all" | "movie" | "series" | "special";
-type PendingUnwatch = { item: ContentItem; episode: number; newerRecords: ProgressRow[] };
-export type NexusApiRequest = (path: string, init?: RequestInit) => Promise<Response>;
+/** An un-watch waiting for the user to confirm what else it removes. */
+type PendingUnwatch = {
+  item: ContentItem;
+  episode: number;
+  /** Later episodes of the same series that go with it. */
+  laterEpisodes: number[];
+  /** Other titles whose progress goes with it; their ids are sent as `confirmCleared`. */
+  cleared: { item: ContentItem; units: number }[];
+  /** The server asked: another device added progress this one had not seen. */
+  serverAsked: boolean;
+};
+export type NexusApiRequest = ApiRequest;
 
 const browserApiRequest: NexusApiRequest = (path, init) => fetch(path, init);
 
@@ -100,11 +112,6 @@ const INTRO_SLIDES = [
 function visibleLock(item: ContentItem, index: ViewingIndex, now: number) {
   const lock = lockReason(item, index, now);
   return lock && lock.kind !== "pending" ? lock : null;
-}
-
-/** The viewing state from an API reply, tolerating a missing field. */
-function readState(payload: { state?: Partial<ViewingState> }): ViewingState {
-  return { rows: payload.state?.rows ?? [], skips: payload.state?.skips ?? [] };
 }
 
 function dateLabel(value: string) {
@@ -336,40 +343,10 @@ function AuthScreen({ onAuthenticated, request, initialNotice = "" }: { onAuthen
   );
 }
 
-function universeLabel(universe: Universe) {
-  return universe === "mcu" ? "MCU" : universe === "xmen" ? "X-Men" : "Street-Level Saga";
-}
-
-/** Titles that flip from locked to unlocked once `item` is marked watched — for the "new transmission unlocked" toast. */
-function detectNewlyUnlocked(item: ContentItem, oldIndex: ViewingIndex, newIndex: ViewingIndex, now: number) {
-  return CONTENT.filter((candidate) => candidate.id !== item.id && visibleLock(candidate, oldIndex, now) !== null && visibleLock(candidate, newIndex, now) === null);
-}
-
-/** Phase/universe/Doomsday completions that flip to true once `item` is marked watched — for the milestone celebration. */
-function detectMilestones(item: ContentItem, oldIndex: ViewingIndex, newIndex: ViewingIndex): DelightToastInput[] {
-  const milestones: DelightToastInput[] = [];
-  const justCompleted = (items: ContentItem[]) => items.length > 0 && !items.every((candidate) => isWatchedComplete(candidate, oldIndex)) && items.every((candidate) => isWatchedComplete(candidate, newIndex));
-
-  if (item.universe === "mcu") {
-    const phaseItems = MCU_CONTENT.filter((candidate) => candidate.phase === item.phase && candidate.required);
-    if (justCompleted(phaseItems)) {
-      milestones.push({ kind: "milestone", title: `${item.phase} complete`, detail: "Every required entry in this phase is watched." });
-    }
-  }
-
-  const universeItems = UNIVERSE_CONTENT[item.universe].filter((candidate) => candidate.required);
-  if (justCompleted(universeItems)) {
-    milestones.push({ kind: "milestone", title: `${universeLabel(item.universe)} complete`, detail: "Every required entry in this archive is watched." });
-  }
-
-  if (item.universe !== "street") {
-    const doomsdayItems = [...MCU_CONTENT, ...XMEN_CONTENT].filter((candidate) => candidate.required);
-    if (justCompleted(doomsdayItems)) {
-      milestones.push({ kind: "milestone", title: "Doomsday protocol complete", detail: "You are ready for Avengers: Doomsday." });
-    }
-  }
-
-  return milestones;
+/** How long each kind of toast stays. The checkpoint toast's Undo is offered for 6 s. */
+function toastLifetime(toast: ToastSpec) {
+  if (toast.kind === "checkpoint") return toast.undo ? 6000 : 5600;
+  return toast.kind === "unlock" ? 6800 : 7200;
 }
 
 /** "29 movies + 4 specials + 120 episodes", leaving out any part whose count is zero. */
@@ -430,7 +407,7 @@ function TimelineCard({
   viewing,
   now,
   outOfOrder,
-  busy,
+  saving,
   onOpen,
   onOpenPrerequisite,
   onToggle,
@@ -444,7 +421,8 @@ function TimelineCard({
   now: number;
   /** Watched while a prerequisite is unfinished (left behind by an old bug). Stays removable. */
   outOfOrder: boolean;
-  busy: boolean;
+  /** A change to this title is still on its way to the server. */
+  saving: boolean;
   onOpen: () => void;
   onOpenPrerequisite: (item: ContentItem) => void;
   onToggle: (item: ContentItem, episode: number, value: boolean) => void;
@@ -490,13 +468,14 @@ function TimelineCard({
         )}
         {!item.required && <p className="optional-note">Optional entry · excluded from Doomsday readiness</p>}
         <WatchSource item={item} url={watchUrl} loaded={watchLinksLoaded} unlocked={unlocked} placement="card" />
+        {/* Never disabled while saving: the change is already on screen and syncs in the background. */}
         {item.kind === "series" ? (
-          <button className="card-action" onClick={onOpen}>
+          <button className="card-action" data-saving={saving || undefined} onClick={onOpen}>
             <span>{complete ? "Season complete" : `${episodeWatched}/${item.episodes?.length ?? 0} episodes`}</span><ChevronRight size={16} />
           </button>
         ) : (
-          <button className="card-action" disabled={busy || (!complete && !unlocked)} onClick={() => onToggle(item, -1, !complete)}>
-            <span>{busy ? "Syncing…" : complete ? "Watched" : unlocked ? "Mark watched" : "Complete prerequisite"}</span>{complete ? <Check size={16} /> : unlocked ? <Play size={15} /> : <LockKeyhole size={15} />}
+          <button className="card-action" data-saving={saving || undefined} disabled={!complete && !unlocked} onClick={() => onToggle(item, -1, !complete)}>
+            <span>{complete ? "Watched" : unlocked ? "Mark watched" : "Complete prerequisite"}</span>{complete ? <Check size={16} /> : unlocked ? <Play size={15} /> : <LockKeyhole size={15} />}
           </button>
         )}
       </div>
@@ -628,7 +607,7 @@ function DetailDrawer({
   viewing,
   now,
   outOfOrder,
-  busyKey,
+  pending,
   onClose,
   onOpenPrerequisite,
   onToggle,
@@ -640,7 +619,8 @@ function DetailDrawer({
   now: number;
   /** Watched while a prerequisite is unfinished (left behind by an old bug). Stays removable. */
   outOfOrder: boolean;
-  busyKey: string | null;
+  /** Units with a change still on its way to the server (shown as saving; never disabled for it). */
+  pending: PendingKeys;
   onClose: () => void;
   onOpenPrerequisite: (item: ContentItem) => void;
   onToggle: (item: ContentItem, episode: number, value: boolean) => void;
@@ -696,9 +676,8 @@ function DetailDrawer({
                 {(item.episodes ?? []).map((episode, index) => {
                   const checked = watched.has(progressKey(item.id, episode.id));
                   const rowUnlocked = episodeUnlocked(index, episode);
-                  const key = progressKey(item.id, episode.id);
                   return (
-                    <button key={episode.id} className={`episode-row ${checked ? "checked" : ""}`} disabled={busyKey === key || (!checked && (!rowUnlocked || Boolean(item.dataPending)))} onClick={() => onToggle(item, episode.id, !checked)}>
+                    <button key={episode.id} className={`episode-row ${checked ? "checked" : ""}`} data-saving={isUnitPending(pending, item.id, episode.id) || undefined} disabled={!checked && (!rowUnlocked || Boolean(item.dataPending))} onClick={() => onToggle(item, episode.id, !checked)}>
                       <span className="episode-check">{checked ? <Check size={15} /> : rowUnlocked && !item.dataPending ? <Play size={13} /> : <LockKeyhole size={13} />}</span>
                       <span className="episode-number">E{String(episode.id).padStart(2, "0")}</span>
                       <span className="episode-name">{item.dataPending ? `Episode ${episode.id} — metadata pending` : episode.title}</span>
@@ -719,12 +698,12 @@ function DetailDrawer({
           )}
           {lockAction?.kind === "scheduled" && <p className="drawer-release-note"><Clock3 size={15} /> Releases {dateLabel(lockAction.date)}</p>}
           {!lockAction && item.kind !== "series" && (
-            <button className="primary-action drawer-action" disabled={busyKey === progressKey(item.id)} onClick={() => onToggle(item, -1, !complete)}>
+            <button className="primary-action drawer-action" data-saving={isUnitPending(pending, item.id, -1) || undefined} onClick={() => onToggle(item, -1, !complete)}>
               {complete ? "Remove watched status" : "Mark as watched"}{complete ? <X size={17} /> : <Check size={17} />}
             </button>
           )}
           {item.kind === "series" && nextEpisode && (
-            <button className="primary-action drawer-action" disabled={busyKey === progressKey(item.id, nextEpisode.id)} onClick={() => onToggle(item, nextEpisode.id, true)}>
+            <button className="primary-action drawer-action" data-saving={isUnitPending(pending, item.id, nextEpisode.id) || undefined} onClick={() => onToggle(item, nextEpisode.id, true)}>
               Mark E{String(nextEpisode.id).padStart(2, "0")} watched <Check size={17} />
             </button>
           )}
@@ -744,8 +723,20 @@ function UnwatchConfirmation({
   onConfirm: () => void;
 }) {
   const dialogRef = useDialogBehavior(onCancel);
-  const affectedTitles = [...new Set(pending.newerRecords.map((record) => CONTENT_BY_ID.get(record.contentId)?.title).filter(Boolean))];
-  const checkpointLabel = pending.episode > 0 ? `${pending.item.title}, episode ${pending.episode}` : pending.item.title;
+  const { item, episode, laterEpisodes, cleared } = pending;
+  const checkpointLabel = episode > 0 ? `${item.title}, episode ${episode}` : item.title;
+  const parts = [
+    ...(laterEpisodes.length ? ["the episodes after it"] : []),
+    ...(cleared.length ? [`your progress on ${cleared.length} later title${cleared.length === 1 ? "" : "s"}`] : []),
+  ];
+  const rows = [
+    ...(laterEpisodes.length ? [{ key: `${item.id}:later`, title: item.title, detail: episodeRange(laterEpisodes) }] : []),
+    ...cleared.map(({ item: title, units }) => ({
+      key: title.id,
+      title: title.title,
+      detail: title.kind === "series" && units > 0 ? `${units} watched episode${units === 1 ? "" : "s"}` : "",
+    })),
+  ];
 
   return (
     <div className="confirmation-shell">
@@ -753,22 +744,41 @@ function UnwatchConfirmation({
       <section ref={dialogRef} className="confirmation-dialog" role="alertdialog" aria-modal="true" aria-labelledby="unwatch-title" aria-describedby="unwatch-description" tabIndex={-1}>
         <div className="confirmation-icon"><Zap size={22} /></div>
         <p className="eyebrow">TIMELINE SAFEGUARD</p>
-        <h2 id="unwatch-title">Remove an earlier watched item?</h2>
-        <p id="unwatch-description">You watched {pending.newerRecords.length} newer checkpoint{pending.newerRecords.length === 1 ? "" : "s"} after <strong>{checkpointLabel}</strong>. Removing it may also clear later progress that depends on it.</p>
-        {affectedTitles.length > 0 && <p className="confirmation-affected">Newer progress includes {affectedTitles.slice(0, 3).join(", ")}{affectedTitles.length > 3 ? ` and ${affectedTitles.length - 3} more` : ""}.</p>}
+        <h2 id="unwatch-title">Remove later progress too?</h2>
+        <p id="unwatch-description">
+          {pending.serverAsked && "Progress was added on another device. "}
+          Un-watching <strong>{checkpointLabel}</strong> also removes {parts.join(" and ")}:
+        </p>
+        <ul className="confirmation-list" aria-label="Also removed">
+          {rows.map((row) => <li key={row.key}><strong>{row.title}</strong>{row.detail && <span>{row.detail}</span>}</li>)}
+        </ul>
+        {cleared.length > 0 && <p className="confirmation-note">Those titles need {item.title} watched first.</p>}
         <div className="confirmation-actions">
           <button className="secondary-action" onClick={onCancel}>Keep watched</button>
-          <button className="danger-action" onClick={onConfirm}>Yes, remove it</button>
+          <button className="danger-action" onClick={onConfirm}>Yes, remove all</button>
         </div>
       </section>
     </div>
   );
 }
 
+/** "episode 4", "episodes 4–9", or "episodes 2, 5" when they are not consecutive. */
+function episodeRange(episodes: number[]) {
+  if (episodes.length === 1) return `episode ${episodes[0]}`;
+  const consecutive = episodes.every((episode, index) => index === 0 || episode === episodes[index - 1] + 1);
+  return consecutive ? `episodes ${episodes[0]}–${episodes.at(-1)}` : `episodes ${episodes.join(", ")}`;
+}
+
 
 export default function MarvelNexus({ request = browserApiRequest }: { request?: NexusApiRequest }) {
   const [user, setUser] = useState<User | null>(null);
-  const [viewingState, setViewingState] = useState<ViewingState>(EMPTY_STATE);
+  // Progress lives in the client store (src/lib/client/use-progress.ts), not in this component:
+  // what is on screen is the server's last answer with every unsent change applied on top.
+  const [gateway] = useState(() => createRemoteGateway(request));
+  const progress = useProgress(gateway);
+  const { store } = progress;
+  const viewingState = progress.state;
+  const viewing = progress.index;
   // The clock the release locks are checked against. Refreshed each minute so a title opens on
   // its release date without a reload.
   const [now, setNow] = useState(() => Date.now());
@@ -785,8 +795,8 @@ export default function MarvelNexus({ request = browserApiRequest }: { request?:
   const [hasRecoveryCode, setHasRecoveryCode] = useState(true);
   // Shown on the sign-in screen after the account panel signs this device out.
   const [signedOutNotice, setSignedOutNotice] = useState("");
-  const [busyKey, setBusyKey] = useState<string | null>(null);
   const [notice, setNotice] = useState("");
+  const noticeTimerRef = useRef<number | null>(null);
   const [delightToasts, setDelightToasts] = useState<DelightToast[]>([]);
   const delightIdRef = useRef(0);
   const [loadError, setLoadError] = useState("");
@@ -798,27 +808,37 @@ export default function MarvelNexus({ request = browserApiRequest }: { request?:
   const searchInputRef = useRef<HTMLInputElement>(null);
   useGlassSpotlight();
 
+  /** Shows a short message in the toast slot; a newer message replaces it and restarts its timer. */
+  const showNotice = useCallback((text: string, ms = 4200) => {
+    if (noticeTimerRef.current !== null) window.clearTimeout(noticeTimerRef.current);
+    setNotice(text);
+    noticeTimerRef.current = window.setTimeout(() => {
+      noticeTimerRef.current = null;
+      setNotice("");
+    }, ms);
+  }, []);
+
+  /** Takes in what `GET /api/progress` returned: the signed-in user and their progress, or why not. */
+  function applyLoaded(result: LoadResult) {
+    if (result.kind === "aborted") return;
+    if (result.kind === "signed-out") {
+      setUser(null);
+      store.reset(EMPTY_STATE);
+    } else if (result.kind === "unavailable") {
+      setLoadError("The local timeline vault is unavailable.");
+    } else {
+      setUser(result.user);
+      store.reset(result.state);
+      setDatabaseMode(result.databaseMode);
+      setHasRecoveryCode(result.hasRecoveryCode);
+    }
+    setLoading(false);
+  }
+
   async function loadProgress() {
     setLoading(true);
     setLoadError("");
-    try {
-      const response = await request("/api/progress", { cache: "no-store" });
-      if (response.status === 401) {
-        setUser(null);
-        setViewingState(EMPTY_STATE);
-        return;
-      }
-      const payload = await response.json();
-      if (!response.ok) throw new Error(payload.error ?? "The local timeline vault is unavailable.");
-      setUser(payload.user);
-      setViewingState(readState(payload));
-      setDatabaseMode(payload.databaseMode ?? "TIMELINE VAULT");
-      setHasRecoveryCode(payload.account?.hasRecoveryCode !== false);
-    } catch {
-      setLoadError("The local timeline vault is unavailable.");
-    } finally {
-      setLoading(false);
-    }
+    applyLoaded(await gateway.load());
   }
 
   async function handleAuthenticated(isNewAccount: boolean) {
@@ -827,30 +847,12 @@ export default function MarvelNexus({ request = browserApiRequest }: { request?:
     if (isNewAccount) setLoreOpen(true);
   }
 
+  const onFirstLoad = useEffectEvent((result: LoadResult) => applyLoaded(result));
   useEffect(() => {
     const controller = new AbortController();
-    request("/api/progress", { cache: "no-store", signal: controller.signal })
-      .then(async (response) => ({ response, payload: await response.json() }))
-      .then(({ response, payload }) => {
-        if (response.status === 401) {
-          setUser(null);
-          setViewingState(EMPTY_STATE);
-        } else {
-          if (!response.ok) throw new Error(payload.error ?? "The local timeline vault is unavailable.");
-          setUser(payload.user);
-          setViewingState(readState(payload));
-          setDatabaseMode(payload.databaseMode ?? "TIMELINE VAULT");
-          setHasRecoveryCode(payload.account?.hasRecoveryCode !== false);
-        }
-        setLoading(false);
-      })
-      .catch((error: unknown) => {
-        if (error instanceof DOMException && error.name === "AbortError") return;
-        setLoadError("The local timeline vault is unavailable.");
-        setLoading(false);
-      });
+    void gateway.load(controller.signal).then((result) => onFirstLoad(result));
     return () => controller.abort();
-  }, [request]);
+  }, [gateway]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -873,7 +875,6 @@ export default function MarvelNexus({ request = browserApiRequest }: { request?:
     return () => window.clearInterval(timer);
   }, []);
 
-  const viewing = useMemo(() => indexOf(viewingState), [viewingState]);
   const outOfOrder = useMemo(() => new Set(outOfOrderTitles(viewingState)), [viewingState]);
   const items = universe === "mcu" ? MCU_CONTENT : universe === "xmen" ? XMEN_CONTENT : STREET_CONTENT;
   const itemIndexById = useMemo(() => new Map(items.map((entry, index) => [entry.id, index])), [items]);
@@ -916,83 +917,122 @@ export default function MarvelNexus({ request = browserApiRequest }: { request?:
     setDelightToasts((current) => current.filter((toast) => toast.id !== id));
   }
 
-  async function persistToggle(item: ContentItem, episode: number, value: boolean) {
-    const key = progressKey(item.id, episode);
-    setBusyKey(key);
-    setNotice("");
-    try {
-      const response = await request("/api/progress", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: { type: value ? "watch" : "unwatch", contentId: item.id, episode } }),
-      });
-      const payload = await response.json();
-      if (!response.ok) throw new Error(payload.error ?? "Timeline update rejected.");
-      const newState = readState(payload);
-      setViewingState(newState);
-
-      if (value) {
-        const newViewing = indexOf(newState);
-        const unitSeconds = item.kind === "series" && episode > 0
-          ? item.episodes?.find((candidate) => candidate.id === episode)?.runtimeSec ?? 0
-          : item.runtimeSec;
-        if (unitSeconds > 0) {
-          const countsTowardDoomsday = item.required && item.universe !== "street";
-          const amount = formatDuration(unitSeconds);
-          pushDelightToast({ kind: "checkpoint", title: "Checkpoint secured", detail: countsTowardDoomsday ? `${amount} closer to Doomsday` : `${amount} logged in your archive` });
-        }
-        const revealed = detectNewlyUnlocked(item, viewing, newViewing, now);
-        if (revealed.length) {
-          pushDelightToast({ kind: "unlock", item: revealed[0], more: revealed.length - 1 }, 6800);
-        }
-        for (const milestone of detectMilestones(item, viewing, newViewing)) {
-          pushDelightToast(milestone, 7200);
-        }
+  /**
+   * Applies a progress action on screen at once; the store saves it in the background. Toasts come
+   * from the before and after indexes `dispatch` captured, so they see the change. Nothing here
+   * waits for the server.
+   */
+  function runAction(action: Action, confirmCleared?: readonly string[]) {
+    const result = store.dispatch(action, { confirmCleared });
+    if (!result.ok) {
+      // The un-watch would now clear more than the dialog showed: ask again with the fresh list.
+      const item = action.type === "unwatch" ? CONTENT_BY_ID.get(action.contentId) : undefined;
+      if (result.failure.code === "confirm-required" && action.type === "unwatch" && item) {
+        requestUnwatch(item, action.episode);
+      } else {
+        showNotice(result.failure.message);
       }
-    } catch (error) {
-      setNotice(error instanceof Error ? error.message : "Timeline update rejected.");
-      window.setTimeout(() => setNotice(""), 4200);
-    } finally {
-      setBusyKey(null);
+      return;
     }
+    if (!result.changed) return;
+    const at = Date.now();
+    // An "unlocked" toast whose title is locked again (after an Undo, say) would mislead.
+    setDelightToasts((current) =>
+      current.filter((toast) => toast.kind !== "unlock" || (isOutstanding(toast.item, result.after) && lockReason(toast.item, result.after, at) === null)),
+    );
+    const toasts = actionToasts(action, result.before, result.after, at);
+    // The toast with Undo goes last: phones show only the newest two, and Undo must stay reachable.
+    const hasUndo = (toast: ToastSpec) => toast.kind === "checkpoint" && Boolean(toast.undo);
+    for (const toast of [...toasts.filter((toast) => !hasUndo(toast)), ...toasts.filter(hasUndo)]) pushDelightToast(toast, toastLifetime(toast));
+  }
+
+  /**
+   * Un-watches one unit, asking first only when later episodes or other titles would go with it,
+   * and listing exactly those. `serverCleared` is the server's list when it asked again
+   * (another device added progress this one had not seen).
+   */
+  function requestUnwatch(item: ContentItem, episode: number, serverCleared?: readonly string[]) {
+    const shown = store.getSnapshot();
+    if (!shown.index.watched.has(progressKey(item.id, episode))) return;
+    const impact = unwatchImpact(shown.state, item.id, episode, new Date());
+    if (!impact) return;
+    const cleared = [...impact.cleared];
+    for (const id of serverCleared ?? []) {
+      const title = CONTENT_BY_ID.get(id);
+      if (title && !cleared.some((entry) => entry.item.id === id)) cleared.push({ item: title, units: 0 });
+    }
+    if (serverCleared?.length || needsConfirmation(impact)) {
+      setPendingUnwatch({ item, episode, laterEpisodes: impact.laterEpisodes, cleared, serverAsked: Boolean(serverCleared?.length) });
+      return;
+    }
+    runAction({ type: "unwatch", contentId: item.id, episode });
   }
 
   function toggle(item: ContentItem, episode: number, value: boolean) {
-    if (!value) {
-      const rows = viewingState.rows;
-      const recordIndex = rows.findIndex((record) => record.contentId === item.id && record.episode === episode);
-      if (recordIndex >= 0 && recordIndex < rows.length - 1) {
-        setPendingUnwatch({ item, episode, newerRecords: rows.slice(recordIndex + 1) });
-        return;
-      }
-    }
-    void persistToggle(item, episode, value);
+    if (value) runAction({ type: "watch", contentId: item.id, episode });
+    else requestUnwatch(item, episode);
   }
 
   function confirmUnwatch() {
     if (!pendingUnwatch) return;
-    const { item, episode } = pendingUnwatch;
+    const { item, episode, cleared } = pendingUnwatch;
     setPendingUnwatch(null);
-    void persistToggle(item, episode, false);
+    runAction({ type: "unwatch", contentId: item.id, episode }, cleared.map((entry) => entry.item.id));
   }
+
+  /** The toast's Undo: the matching un-watch, through the same confirmation as any other. */
+  function undoCheckpoint(target: { contentId: string; episode: number }) {
+    const item = CONTENT_BY_ID.get(target.contentId);
+    if (item) requestUnwatch(item, target.episode);
+  }
+
+  /** What the background sync has to tell the user: a refusal, a fresh confirmation, or a lost session. */
+  const onSyncEvent = useEffectEvent((event: SyncEvent) => {
+    // The celebration toasts may describe a change that was not saved after all.
+    setDelightToasts([]);
+    if (event.type === "rejected") {
+      showNotice(rejectionNotice(event.rejected, event.removed), 9000);
+    } else if (event.type === "confirm-required") {
+      if (event.removed.length) showNotice(removedNotice(event.removed), 9000);
+      const { action } = event.entry;
+      const item = action.type === "unwatch" ? CONTENT_BY_ID.get(action.contentId) : undefined;
+      if (action.type === "unwatch" && item) requestUnwatch(item, action.episode, event.cleared);
+    } else {
+      setSelected(null);
+      setAccountOpen(false);
+      setPendingUnwatch(null);
+      setUser(null);
+      setSignedOutNotice(
+        event.lost
+          ? `You were signed out, so ${event.lost} change${event.lost === 1 ? " was" : "s were"} not saved. Sign in to continue.`
+          : "You were signed out. Sign in to continue.",
+      );
+    }
+  });
+  useEffect(() => store.onEvent((event) => onSyncEvent(event)), [store]);
 
   /** The account panel signed this device out (sign out everywhere, or the account was deleted). */
   function handleSignedOutByPanel(message: string) {
     setAccountOpen(false);
     setSelected(null);
     setUser(null);
-    setViewingState(EMPTY_STATE);
+    store.reset(EMPTY_STATE);
     setSignedOutNotice(message);
   }
 
   async function logout() {
+    // Queued changes would be lost with the session: let them reach the server first.
+    if (!(await store.whenIdle(4000))) {
+      showNotice("Some changes are not saved yet. Try again once you are back online.", 6000);
+      return;
+    }
     try {
       const response = await request("/api/auth/logout", { method: "POST" });
       if (!response.ok) throw new Error("Logout failed");
       setUser(null);
-      setViewingState(EMPTY_STATE);
+      store.reset(EMPTY_STATE);
     } catch {
-      setNotice("Could not close the local session. Try again.");
+      showNotice("Could not close the local session. Try again.");
     }
   }
 
@@ -1090,15 +1130,20 @@ export default function MarvelNexus({ request = browserApiRequest }: { request?:
   const doomsdayComplete = doomsdayStats.complete;
   const daysUntilDoomsday = Math.max(0, Math.ceil((DOOMSDAY.getTime() - now) / 86400000));
   const nextRequiredLock = nextRequired ? visibleLock(nextRequired, viewing, now) : null;
+  const offline = progress.status === "offline";
+  // "idle" once every change is saved; the browser tests wait for it before reloading.
+  const syncState = offline ? "offline" : progress.outbox.length ? "saving" : "idle";
 
   return (
-    <main className="app-shell" data-universe={universe}>
+    <main className="app-shell" data-universe={universe} data-sync={syncState}>
       <div className="ambient-grid" />
       <header className="topbar">
         <div className="brand-lockup compact">
           <div className="brand-mark"><span>D</span></div>
           <div><strong>DOOM FLIX</strong><small>WATCH PROTOCOL</small></div>
         </div>
+        {offline && <span className="sync-chip" aria-hidden="true"><CloudOff size={14} /> Offline — changes will sync</span>}
+        <span className="sr-only" role="status">{offline ? "Offline. Your changes are kept and will sync when the connection is back." : ""}</span>
         <nav>
           <button onClick={() => setLoreOpen(true)}><Orbit size={15} /> Lore brief</button>
         </nav>
@@ -1202,7 +1247,7 @@ export default function MarvelNexus({ request = browserApiRequest }: { request?:
                 viewing={viewing}
                 now={now}
                 outOfOrder={outOfOrder.has(item.id)}
-                busy={busyKey === progressKey(item.id)}
+                saving={isTitlePending(progress.pending, item)}
                 onOpen={() => setSelected(item)}
                 onOpenPrerequisite={openArchiveItem}
                 onToggle={toggle}
@@ -1217,7 +1262,7 @@ export default function MarvelNexus({ request = browserApiRequest }: { request?:
 
       <footer><div className="brand-lockup compact"><div className="brand-mark"><span>D</span></div><div><strong>DOOM FLIX</strong><small>WATCH PROTOCOL</small></div></div><p>Personal viewing archive • Release-order spoiler protection active • Developed by Abdul Rehman Shahid</p><span><Database size={14} /> {CONTENT.length} transmissions indexed</span></footer>
 
-      {selected && <DetailDrawer key={selected.id} item={selected} viewing={viewing} now={now} outOfOrder={outOfOrder.has(selected.id)} busyKey={busyKey} onClose={() => setSelected(null)} onOpenPrerequisite={openArchiveItem} onToggle={toggle} watchUrl={watchCatalogue.links.get(normalizeWatchTitle(selected.title))} watchLinksLoaded={watchCatalogue.loaded} />}
+      {selected && <DetailDrawer key={selected.id} item={selected} viewing={viewing} now={now} outOfOrder={outOfOrder.has(selected.id)} pending={progress.pending} onClose={() => setSelected(null)} onOpenPrerequisite={openArchiveItem} onToggle={toggle} watchUrl={watchCatalogue.links.get(normalizeWatchTitle(selected.title))} watchLinksLoaded={watchCatalogue.loaded} />}
       {loreOpen && (
         <LoreExperience
           viewing={viewing}
@@ -1252,7 +1297,7 @@ export default function MarvelNexus({ request = browserApiRequest }: { request?:
         />
       )}
       {notice && <div className="toast" role="status" aria-live="polite"><Zap size={16} /> {notice}</div>}
-      <ToastStack toasts={delightToasts} onDismiss={dismissDelightToast} onOpenItem={openArchiveItem} />
+      <ToastStack toasts={delightToasts} onDismiss={dismissDelightToast} onOpenItem={openArchiveItem} onUndo={undoCheckpoint} />
       {nextRequired && !nextCardVisible && !selected && !loreOpen && !paletteOpen && !accountOpen && (
         <button
           className="jump-pill"

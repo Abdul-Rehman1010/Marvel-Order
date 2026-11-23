@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 
-import type { APIRequestContext, Page, TestInfo } from "@playwright/test";
+import { expect, type APIRequestContext, type Page, type TestInfo } from "@playwright/test";
 
 export const TEST_PASSWORD = "e2e-password-1";
 
@@ -60,6 +60,16 @@ export async function markWatchedViaApi(request: APIRequestContext, steps: SeedS
       throw new Error(`Seeding ${step.contentId}:${step.episode} failed (${response.status()}): ${await response.text()}`);
     }
   }
+}
+
+/**
+ * Waits until every progress change made in the page has reached the server. Since package 2.1
+ * a tick shows at once and is saved in the background, so a test must wait for this before it
+ * reloads or reads progress through the API. (`data-sync` on the app shell is "saving" or
+ * "offline" until then.)
+ */
+export async function waitForSync(page: Page) {
+  await expect(page.locator("main.app-shell")).toHaveAttribute("data-sync", "idle");
 }
 
 /** Waits for web fonts and for the images currently on screen, then lets layout settle. */
