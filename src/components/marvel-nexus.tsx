@@ -5,6 +5,7 @@ import {
   ArrowDown,
   ArrowRight,
   Check,
+  CheckCheck,
   ChevronDown,
   ChevronRight,
   ChevronUp,
@@ -19,13 +20,16 @@ import {
   Fingerprint,
   Layers3,
   Link2Off,
+  ListChecks,
   LockKeyhole,
   LogOut,
   Orbit,
   Play,
   Radio,
+  RotateCcw,
   Search,
   ShieldCheck,
+  SkipForward,
   Star,
   Tv,
   X,
@@ -43,21 +47,35 @@ import {
   type ContentItem,
   type Universe,
 } from "@/lib/content";
-import { actionToasts, needsConfirmation, rejectionNotice, removedNotice, unwatchImpact, type ToastSpec } from "@/lib/client/feedback";
+import { recapOf } from "@/lib/catalogue/extras";
+import { EMPTY_CATCH_UP, type CatchUpDraft } from "@/lib/client/catch-up";
+import {
+  actionToasts,
+  needsConfirmation,
+  rejectionNotice,
+  removedNotice,
+  skipImpact,
+  unwatchImpact,
+  type ToastSpec,
+  type UndoTarget,
+} from "@/lib/client/feedback";
 import { createRemoteGateway, type ApiRequest, type LoadResult } from "@/lib/client/gateway";
 import { isTitlePending, isUnitPending, type PendingKeys } from "@/lib/client/outbox";
-import { useProgress, type SyncEvent } from "@/lib/client/use-progress";
+import { useProgress, type DispatchResult, type SyncEvent } from "@/lib/client/use-progress";
 import { formatDuration, formatLockReason, formatRuntimeOf } from "@/lib/engine/format";
 import type { Action } from "@/lib/engine/reducer";
 import {
   EMPTY_STATE,
   isOutstanding,
+  isSkipped,
   isWatchedComplete,
   lockReason,
   missingPrerequisite,
   outOfOrderTitles,
   progressKey,
+  unskipBlockers,
   watchedUnitCount,
+  type SkipReason,
   type ViewingIndex,
 } from "@/lib/engine/state";
 import { getStats } from "@/lib/engine/stats";
@@ -76,10 +94,15 @@ import { LoreExperience } from "@/components/nexus/lore-experience";
 import { InstallAppButton } from "@/components/nexus/install-app";
 import { AccountPanel } from "@/components/nexus/account-panel";
 import { RecoveryCodeDialog } from "@/components/nexus/recovery-code-dialog";
+import { CardMenu } from "@/components/nexus/card-menu";
+import { SkipConfirmation } from "@/components/nexus/skip-confirmation";
+import { CatchUpWizard, type CatchUpFailure } from "@/components/nexus/catch-up-wizard";
 
 type User = { id: string; username: string };
 type RequirementFilter = "all" | "doomsday" | "optional";
 type FormatFilter = "all" | "movie" | "series" | "special";
+/** "Unwatched" is every title still to do (neither watched nor skipped); "Skipped" is the skipped ones. */
+type ProgressFilter = "all" | "unwatched" | "skipped";
 /** An un-watch waiting for the user to confirm what else it removes. */
 type PendingUnwatch = {
   item: ContentItem;
@@ -90,6 +113,8 @@ type PendingUnwatch = {
   cleared: { item: ContentItem; units: number }[];
   /** The server asked: another device added progress this one had not seen. */
   serverAsked: boolean;
+  /** An Undo of a watch that ended a skip: the skip comes back with it. */
+  restoreSkip?: SkipReason;
 };
 export type NexusApiRequest = ApiRequest;
 
@@ -361,17 +386,27 @@ function checkpointBreakdown(stats: { movies: number; specials: number; totalEpi
     .join(" + ");
 }
 
-function CheckpointCounts({ watched, total }: { watched: number; total: number }) {
+/**
+ * Watched and remaining units, plus a "Skipped" row when any units are skipped. The three add up to
+ * the checkpoint total in the line above: skipped units are neither watched nor still to do.
+ */
+function CheckpointCounts({ watched, remaining, skipped }: { watched: number; remaining: number; skipped: number }) {
   return (
-    <dl className="checkpoint-counts" aria-label={`${watched} items watched, ${Math.max(0, total - watched)} items remaining`}>
+    <dl className="checkpoint-counts" aria-label={`${watched} items watched, ${remaining} items remaining${skipped ? `, ${skipped} skipped` : ""}`}>
       <div className="watched-count">
         <dt><Check size={13} /> <span>Watched</span></dt>
         <dd>{watched}</dd>
       </div>
       <div className="remaining-count">
         <dt><Clock3 size={13} /> <span>Remaining</span></dt>
-        <dd>{Math.max(0, total - watched)}</dd>
+        <dd>{remaining}</dd>
       </div>
+      {skipped > 0 && (
+        <div className="skipped-count">
+          <dt><SkipForward size={13} /> <span>Skipped</span></dt>
+          <dd>{skipped}</dd>
+        </div>
+      )}
     </dl>
   );
 }
@@ -411,6 +446,8 @@ function TimelineCard({
   onOpen,
   onOpenPrerequisite,
   onToggle,
+  onSkip,
+  onUnskip,
   watchUrl,
   watchLinksLoaded,
 }: {
@@ -426,21 +463,33 @@ function TimelineCard({
   onOpen: () => void;
   onOpenPrerequisite: (item: ContentItem) => void;
   onToggle: (item: ContentItem, episode: number, value: boolean) => void;
+  /** Asks to skip this title (opens the confirmation). */
+  onSkip: (item: ContentItem) => void;
+  onUnskip: (item: ContentItem) => void;
   watchUrl?: string;
   watchLinksLoaded: boolean;
 }) {
   const complete = isWatchedComplete(item, viewing);
+  const skipped = isSkipped(item, viewing);
   const lock = visibleLock(item, viewing, now);
   const unlocked = lock === null;
   const reason = lock ? formatLockReason(item, lock) : null;
   const prerequisite = lock?.kind === "prerequisite" ? lock.item : null;
   const episodeWatched = item.kind === "series" ? watchedUnitCount(item, viewing) : 0;
+  const episodeTotal = item.episodes?.length ?? 0;
+  // The episode a series card can mark straight away (package 2.3): the first unwatched one.
+  const nextEpisode = item.kind === "series" && !item.dataPending && unlocked && !complete && !skipped
+    ? nextEpisodeOf(item, viewing)
+    : undefined;
+  // Un-skipping never clears anything, so it waits until no watched later title relies on the skip.
+  const blockers = skipped ? unskipBlockers(item, viewing) : [];
+  const blockedNoteId = `unskip-blocked-${item.id}`;
   const tiltRef = usePointerTilt<HTMLButtonElement>(5);
 
   return (
     <article
       id={`timeline-item-${item.id}`}
-      className={`timeline-card ${item.universe} ${complete ? "is-complete" : ""} ${!unlocked ? "is-locked" : ""} ${!item.required ? "is-optional" : ""}`}
+      className={`timeline-card ${item.universe} ${complete ? "is-complete" : ""} ${skipped ? "is-skipped" : ""} ${!unlocked ? "is-locked" : ""} ${!item.required ? "is-optional" : ""}`}
       style={{ "--tint": POSTER_TINTS[item.id] ?? DEFAULT_TINT } as React.CSSProperties}
     >
       <button ref={tiltRef} className="card-visual" onClick={onOpen} aria-label={`Open ${item.title} details`}>
@@ -448,13 +497,20 @@ function TimelineCard({
         <div className="card-scrim" />
         <div className="card-sheen" aria-hidden="true" />
         <span className="sequence-number">{String(index + 1).padStart(2, "0")}</span>
-        {!unlocked && <span className="poster-lock" aria-hidden="true"><LockKeyhole size={18} /></span>}
+        {!unlocked && !skipped && <span className="poster-lock" aria-hidden="true"><LockKeyhole size={18} /></span>}
         {complete && <div className="complete-stamp" aria-hidden="true"><Check size={17} strokeWidth={3} /></div>}
       </button>
       <div className="card-copy">
         <div className="card-topline">
           <span className={`type-badge ${item.required ? "required" : "optional"}`}>{item.required ? "Required" : "Optional · Safe to skip"}</span>
+          {skipped && <span className="skip-chip"><SkipForward size={12} /> Skipped</span>}
           {item.recommendation && <span className="goated-badge"><Star size={12} fill="currentColor" /> DEV PICK</span>}
+          {!complete && !skipped && (
+            <CardMenu
+              label={`More actions for ${item.title}`}
+              items={[{ key: "skip", label: "Skip this title", icon: <SkipForward size={15} />, onSelect: () => onSkip(item) }]}
+            />
+          )}
         </div>
         <div className="card-meta"><span>{dateLabel(item.releaseDate)}</span><i /><span>{item.kind === "series" ? `${item.episodes?.length ?? 0} episodes` : formatRuntimeOf(item.runtimeSec)}</span></div>
         <h3>{item.title}</h3>
@@ -469,9 +525,43 @@ function TimelineCard({
         {!item.required && <p className="optional-note">Optional entry · excluded from Doomsday readiness</p>}
         <WatchSource item={item} url={watchUrl} loaded={watchLinksLoaded} unlocked={unlocked} placement="card" />
         {/* Never disabled while saving: the change is already on screen and syncs in the background. */}
-        {item.kind === "series" ? (
+        {skipped ? (
+          <>
+            <div className="card-skip-actions">
+              {/* Normal marking: the skip ends by itself once the title is fully watched. A series opens its episodes. */}
+              <button
+                className="card-action"
+                data-saving={saving || undefined}
+                disabled={item.kind !== "series" && !unlocked}
+                onClick={item.kind === "series" ? onOpen : () => onToggle(item, -1, true)}
+              >
+                <span>{item.kind === "series" ? `Watch anyway · ${episodeWatched}/${item.episodes?.length ?? 0}` : "Watch anyway"}</span>
+                {item.kind !== "series" && !unlocked ? <LockKeyhole size={15} /> : <Play size={15} />}
+              </button>
+              <button
+                className="card-action card-unskip"
+                data-saving={saving || undefined}
+                disabled={blockers.length > 0}
+                aria-describedby={blockers.length ? blockedNoteId : undefined}
+                onClick={() => onUnskip(item)}
+              >
+                <span>Un-skip</span><RotateCcw size={14} />
+              </button>
+            </div>
+            {blockers.length > 0 && <p id={blockedNoteId} className="card-skip-note">{unskipBlockedText(blockers)}</p>}
+          </>
+        ) : nextEpisode ? (
+          <div className="card-series-actions">
+            <button className="card-action" data-saving={saving || undefined} onClick={() => onToggle(item, nextEpisode.id, true)}>
+              <span>Mark E{String(nextEpisode.id).padStart(2, "0")} watched</span><Play size={15} />
+            </button>
+            <button className="card-action card-open" onClick={onOpen} aria-label={`Open ${item.title}: ${episodeWatched} of ${episodeTotal} episodes watched`}>
+              <span>{episodeWatched}/{episodeTotal}</span><ChevronRight size={16} />
+            </button>
+          </div>
+        ) : item.kind === "series" ? (
           <button className="card-action" data-saving={saving || undefined} onClick={onOpen}>
-            <span>{complete ? "Season complete" : `${episodeWatched}/${item.episodes?.length ?? 0} episodes`}</span><ChevronRight size={16} />
+            <span>{complete ? "Season complete" : `${episodeWatched}/${episodeTotal} episodes`}</span><ChevronRight size={16} />
           </button>
         ) : (
           <button className="card-action" data-saving={saving || undefined} disabled={!complete && !unlocked} onClick={() => onToggle(item, -1, !complete)}>
@@ -501,7 +591,9 @@ function PrerequisiteChain({
   const prerequisites = chain.slice(0, -1);
   const next = missingPrerequisite(item, viewing);
   const selectedUnlocked = visibleLock(item, viewing, now) === null;
-  const completedPrerequisites = prerequisites.filter((candidate) => isWatchedComplete(candidate, viewing)).length;
+  // Cleared = watched or skipped: a skipped prerequisite no longer blocks anything.
+  const completedPrerequisites = prerequisites.filter((candidate) => !isOutstanding(candidate, viewing)).length;
+  const anySkipped = prerequisites.some((candidate) => isSkipped(candidate, viewing));
   const nextIndex = next ? chain.findIndex((candidate) => candidate.id === next.id) : -1;
   const previewStart = nextIndex >= 0 ? nextIndex : Math.max(0, chain.length - 3);
   const previewRows = chain.slice(previewStart, previewStart + 3);
@@ -537,7 +629,7 @@ function PrerequisiteChain({
         <div>
           <span>VIEWING PATH</span>
           <strong id={`${listId}-title`}>{next ? "Prerequisites remaining" : "Prerequisites complete"}</strong>
-          <p>{next ? `Start with ${next.title}.` : "Everything required for this title has been watched."}</p>
+          <p>{next ? `Start with ${next.title}.` : anySkipped ? "Everything required for this title is watched or skipped." : "Everything required for this title has been watched."}</p>
         </div>
         <span>{completedPrerequisites}/{prerequisites.length}</span>
       </header>
@@ -546,18 +638,19 @@ function PrerequisiteChain({
         <ol id={listId} className="viewing-path-list">
           {visibleRows.map((chainItem) => {
             const complete = isWatchedComplete(chainItem, viewing);
+            const skippedRow = isSkipped(chainItem, viewing);
             const selected = chainItem.id === item.id;
             const watchNext = chainItem.id === next?.id;
             const scheduled = selected && !next && !selectedUnlocked;
-            const tone = complete || (selected && selectedUnlocked) ? "complete" : scheduled ? "scheduled" : "pending";
+            const tone = complete || (selected && selectedUnlocked && !skippedRow) ? "complete" : skippedRow ? "skipped" : scheduled ? "scheduled" : "pending";
             const watchedEpisodes = chainItem.kind === "series" ? watchedUnitCount(chainItem, viewing) : 0;
             const status = selected
-              ? complete ? "Watched" : selectedUnlocked ? "Ready to watch" : scheduled ? "Scheduled" : "Locked"
-              : complete ? "Watched" : watchNext ? "Watch next" : "Still required";
+              ? complete ? "Watched" : skippedRow ? "Skipped" : selectedUnlocked ? "Ready to watch" : scheduled ? "Scheduled" : "Locked"
+              : complete ? "Watched" : skippedRow ? "Skipped" : watchNext ? "Watch next" : "Still required";
             const rowContent = (
               <>
                 <span className="viewing-path-marker">
-                  {tone === "complete" ? <Check size={14} /> : watchNext ? <Play size={13} /> : scheduled ? <Clock3 size={14} /> : <LockKeyhole size={13} />}
+                  {tone === "complete" ? <Check size={14} /> : tone === "skipped" ? <SkipForward size={13} /> : watchNext ? <Play size={13} /> : scheduled ? <Clock3 size={14} /> : <LockKeyhole size={13} />}
                 </span>
                 <span className="viewing-path-copy">
                   <strong>{chainItem.title}</strong>
@@ -611,6 +704,9 @@ function DetailDrawer({
   onClose,
   onOpenPrerequisite,
   onToggle,
+  onWatchAll,
+  onSkip,
+  onUnskip,
   watchUrl,
   watchLinksLoaded,
 }: {
@@ -624,11 +720,19 @@ function DetailDrawer({
   onClose: () => void;
   onOpenPrerequisite: (item: ContentItem) => void;
   onToggle: (item: ContentItem, episode: number, value: boolean) => void;
+  /** Marks every remaining episode of a series watched. */
+  onWatchAll: (item: ContentItem) => void;
+  /** Asks to skip this title (opens the confirmation). */
+  onSkip: (item: ContentItem) => void;
+  onUnskip: (item: ContentItem) => void;
   watchUrl?: string;
   watchLinksLoaded: boolean;
 }) {
   const watched = viewing.watched;
   const complete = isWatchedComplete(item, viewing);
+  const skipped = isSkipped(item, viewing);
+  const blockers = skipped ? unskipBlockers(item, viewing) : [];
+  const titlePending = pending.titles.has(item.id);
   const lock = visibleLock(item, viewing, now);
   const unlocked = lock === null;
   const reason = lock ? formatLockReason(item, lock) : null;
@@ -646,6 +750,9 @@ function DetailDrawer({
   const nextEpisode = item.kind === "series" && !item.dataPending
     ? (item.episodes ?? []).find((episode, index) => !watched.has(progressKey(item.id, episode.id)) && episodeUnlocked(index, episode))
     : undefined;
+  // "Mark all N remaining" (2.3) is offered beside the next-episode button when more than one is left.
+  const remainingEpisodes = item.kind === "series" ? (item.episodes ?? []).filter((episode) => !watched.has(progressKey(item.id, episode.id))).length : 0;
+  const markAll = Boolean(nextEpisode) && remainingEpisodes >= 2;
   return (
     <div className="drawer-shell">
       <button className="drawer-backdrop" onClick={onClose} aria-label="Close details" />
@@ -666,6 +773,16 @@ function DetailDrawer({
           <PrerequisiteChain item={item} viewing={viewing} now={now} onOpenPrerequisite={onOpenPrerequisite} />
           {!prerequisite && !unlocked && <div className="scheduled-alert"><Clock3 size={18} /><div><strong>SCHEDULED RELEASE</strong><p>{reason}</p></div></div>}
           {outOfOrder && prerequisite && <div className="scheduled-alert"><Zap size={18} /><div><strong>WATCHED OUT OF ORDER</strong><p>You have progress here, but {prerequisite.title} is not finished. You can keep this progress or remove it.</p></div></div>}
+          {skipped && (
+            <div className="skip-alert">
+              <SkipForward size={18} />
+              <div>
+                <strong>SKIPPED</strong>
+                <p>It counts as cleared for unlocking later titles, but not as watched. Watching it to the end removes the skip.</p>
+                {blockers.length > 0 && <p id={`drawer-unskip-blocked-${item.id}`} className="skip-alert-note">{unskipBlockedText(blockers)}</p>}
+              </div>
+            </div>
+          )}
           <p className="drawer-summary">{item.summary}</p>
           <div className="lore-brief"><span><Orbit size={16} /> CONTINUITY BRIEF</span><p>{item.lore}</p></div>
 
@@ -706,6 +823,36 @@ function DetailDrawer({
             <button className="primary-action drawer-action" data-saving={isUnitPending(pending, item.id, nextEpisode.id) || undefined} onClick={() => onToggle(item, nextEpisode.id, true)}>
               Mark E{String(nextEpisode.id).padStart(2, "0")} watched <Check size={17} />
             </button>
+          )}
+          {/* Secondary: every remaining episode at once (2.3), and skip / un-skip (2.2). None applies once the title is fully watched. */}
+          {!complete && (
+            <div className={`drawer-secondary-row ${markAll ? "" : "single"}`}>
+              {markAll && (
+                <button
+                  className="drawer-secondary-action mark-all"
+                  data-saving={titlePending || undefined}
+                  aria-label={`Mark all ${remainingEpisodes} remaining episodes watched`}
+                  onClick={() => onWatchAll(item)}
+                >
+                  <CheckCheck size={15} /> Mark all {remainingEpisodes} remaining
+                </button>
+              )}
+              {skipped ? (
+                <button
+                  className="drawer-secondary-action"
+                  data-saving={titlePending || undefined}
+                  disabled={blockers.length > 0}
+                  aria-describedby={blockers.length ? `drawer-unskip-blocked-${item.id}` : undefined}
+                  onClick={() => onUnskip(item)}
+                >
+                  <RotateCcw size={15} /> Un-skip
+                </button>
+              ) : (
+                <button className="drawer-secondary-action" data-saving={titlePending || undefined} onClick={() => onSkip(item)}>
+                  <SkipForward size={15} /> Skip this title
+                </button>
+              )}
+            </div>
           )}
         </div>
       </aside>
@@ -762,6 +909,26 @@ function UnwatchConfirmation({
   );
 }
 
+/** The first unwatched episode of a series, when the one before it is watched (episodes go in order). */
+function nextEpisodeOf(item: ContentItem, viewing: ViewingIndex) {
+  return (item.episodes ?? []).find(
+    (episode, position) =>
+      !viewing.watched.has(progressKey(item.id, episode.id)) && (position === 0 || viewing.watched.has(progressKey(item.id, episode.id - 1))),
+  );
+}
+
+/** An un-watch; with `restoreSkip` it is the Undo of a watch that ended a skip. */
+function unwatchAction(item: ContentItem, episode: number, restoreSkip?: SkipReason): Action {
+  return { type: "unwatch", contentId: item.id, episode, ...(restoreSkip ? { restoreSkip } : {}) };
+}
+
+/** Why Un-skip is disabled: watched later titles rely on the skip, and un-skipping never clears anything. */
+function unskipBlockedText(blockers: readonly ContentItem[]) {
+  const first = blockers[0]?.title ?? "a later title";
+  const watched = blockers.length > 1 ? `${first} and ${blockers.length - 1} more titles that need it` : `${first}, which needs it`;
+  return `Can't un-skip: you watched ${watched}. Mark it watched instead.`;
+}
+
 /** "episode 4", "episodes 4–9", or "episodes 2, 5" when they are not consecutive. */
 function episodeRange(episodes: number[]) {
   if (episodes.length === 1) return `episode ${episodes[0]}`;
@@ -787,7 +954,7 @@ export default function MarvelNexus({ request = browserApiRequest }: { request?:
   const [universe, setUniverse] = useState<Universe>("mcu");
   const [requirementFilter, setRequirementFilter] = useState<RequirementFilter>("all");
   const [formatFilter, setFormatFilter] = useState<FormatFilter>("all");
-  const [unwatchedOnly, setUnwatchedOnly] = useState(false);
+  const [progressFilter, setProgressFilter] = useState<ProgressFilter>("all");
   const [searchQuery, setSearchQuery] = useState("");
   const [selected, setSelected] = useState<ContentItem | null>(null);
   const [loreOpen, setLoreOpen] = useState(false);
@@ -801,6 +968,14 @@ export default function MarvelNexus({ request = browserApiRequest }: { request?:
   const delightIdRef = useRef(0);
   const [loadError, setLoadError] = useState("");
   const [pendingUnwatch, setPendingUnwatch] = useState<PendingUnwatch | null>(null);
+  /** A title waiting for the user to confirm the skip. */
+  const [pendingSkip, setPendingSkip] = useState<ContentItem | null>(null);
+  /** The catch-up wizard (2.3), open when set: where it starts, and why the last attempt was not saved. */
+  const [catchUp, setCatchUp] = useState<{ draft: CatchUpDraft; failure: CatchUpFailure | null } | null>(null);
+  // The last catch-up sent, so the wizard can come back if the server refuses it after it closed.
+  const lastCatchUpRef = useRef<{ action: Action; draft: CatchUpDraft } | null>(null);
+  // "How it works" swaps the wizard for the lore guide; the wizard returns when the guide closes.
+  const catchUpAfterLoreRef = useRef<CatchUpDraft | null>(null);
   const [watchCatalogue, setWatchCatalogue] = useState<WatchLinkCatalogue & { loaded: boolean }>({ links: new Map(), issues: [], loaded: false });
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [nextCardVisible, setNextCardVisible] = useState(true);
@@ -844,7 +1019,8 @@ export default function MarvelNexus({ request = browserApiRequest }: { request?:
   async function handleAuthenticated(isNewAccount: boolean) {
     setSignedOutNotice("");
     await loadProgress();
-    if (isNewAccount) setLoreOpen(true);
+    // A new account starts with the catch-up wizard (2.3); it links to the lore guide ("How it works").
+    if (isNewAccount) openCatchUp();
   }
 
   const onFirstLoad = useEffectEvent((result: LoadResult) => applyLoaded(result));
@@ -888,7 +1064,8 @@ export default function MarvelNexus({ request = browserApiRequest }: { request?:
     if (formatFilter !== "all") return item.kind === formatFilter;
     return true;
   }).filter((item) => {
-    if (unwatchedOnly) return isOutstanding(item, viewing);
+    if (progressFilter === "unwatched") return isOutstanding(item, viewing);
+    if (progressFilter === "skipped") return isSkipped(item, viewing);
     return true;
   }).filter((item) => item.title.toLocaleLowerCase().includes(searchQuery.trim().toLocaleLowerCase()));
   const nextRequired = items.find((item) => item.required && isOutstanding(item, viewing));
@@ -898,12 +1075,10 @@ export default function MarvelNexus({ request = browserApiRequest }: { request?:
     xmen: XMEN_CONTENT.find((candidate) => candidate.required && isOutstanding(candidate, viewing)),
     street: STREET_CONTENT.find((candidate) => candidate.required && isOutstanding(candidate, viewing)),
   }), [viewing]);
-  const inProgressSeries = useMemo(() => CONTENT.filter((candidate) => {
-    if (candidate.kind !== "series") return false;
-    const total = candidate.episodes?.length ?? 0;
-    const done = watchedUnitCount(candidate, viewing);
-    return done > 0 && done < total;
-  }).slice(0, 6), [viewing]);
+  // Started and still to do: a skipped series leaves the list even if it is partly watched.
+  const inProgressSeries = useMemo(() => CONTENT.filter((candidate) => (
+    candidate.kind === "series" && isOutstanding(candidate, viewing) && watchedUnitCount(candidate, viewing) > 0
+  )).slice(0, 6), [viewing]);
 
   function pushDelightToast(toast: DelightToastInput, ttlMs = 5600) {
     delightIdRef.current += 1;
@@ -920,52 +1095,59 @@ export default function MarvelNexus({ request = browserApiRequest }: { request?:
   /**
    * Applies a progress action on screen at once; the store saves it in the background. Toasts come
    * from the before and after indexes `dispatch` captured, so they see the change. Nothing here
-   * waits for the server.
+   * waits for the server. With `quiet`, a refusal is only returned (the caller shows it).
    */
-  function runAction(action: Action, confirmCleared?: readonly string[]) {
+  function runAction(action: Action, confirmCleared?: readonly string[], options: { quiet?: boolean } = {}): DispatchResult {
+    // The skips on screen before the action: an Undo can then restore a skip the action ends.
+    const previousSkips = store.getSnapshot().state.skips;
     const result = store.dispatch(action, { confirmCleared });
     if (!result.ok) {
+      if (options.quiet) return result;
       // The un-watch would now clear more than the dialog showed: ask again with the fresh list.
       const item = action.type === "unwatch" ? CONTENT_BY_ID.get(action.contentId) : undefined;
       if (result.failure.code === "confirm-required" && action.type === "unwatch" && item) {
-        requestUnwatch(item, action.episode);
+        requestUnwatch(item, action.episode, undefined, action.restoreSkip);
       } else {
         showNotice(result.failure.message);
       }
-      return;
+      return result;
     }
-    if (!result.changed) return;
+    if (!result.changed) return result;
     const at = Date.now();
     // An "unlocked" toast whose title is locked again (after an Undo, say) would mislead.
     setDelightToasts((current) =>
       current.filter((toast) => toast.kind !== "unlock" || (isOutstanding(toast.item, result.after) && lockReason(toast.item, result.after, at) === null)),
     );
-    const toasts = actionToasts(action, result.before, result.after, at);
+    const toasts = actionToasts(action, result.before, result.after, at, previousSkips);
     // The toast with Undo goes last: phones show only the newest two, and Undo must stay reachable.
     const hasUndo = (toast: ToastSpec) => toast.kind === "checkpoint" && Boolean(toast.undo);
     for (const toast of [...toasts.filter((toast) => !hasUndo(toast)), ...toasts.filter(hasUndo)]) pushDelightToast(toast, toastLifetime(toast));
+    return result;
   }
 
   /**
    * Un-watches one unit, asking first only when later episodes or other titles would go with it,
    * and listing exactly those. `serverCleared` is the server's list when it asked again
-   * (another device added progress this one had not seen).
+   * (another device added progress this one had not seen). `restoreSkip` makes it the Undo of a
+   * watch that ended a skip: the skip comes back, so later titles keep their progress.
    */
-  function requestUnwatch(item: ContentItem, episode: number, serverCleared?: readonly string[]) {
+  function requestUnwatch(item: ContentItem, episode: number, serverCleared?: readonly string[], restoreSkip?: SkipReason, expectedLater: readonly number[] = []) {
     const shown = store.getSnapshot();
     if (!shown.index.watched.has(progressKey(item.id, episode))) return;
-    const impact = unwatchImpact(shown.state, item.id, episode, new Date());
+    const impact = unwatchImpact(shown.state, item.id, episode, new Date(), restoreSkip);
     if (!impact) return;
     const cleared = [...impact.cleared];
     for (const id of serverCleared ?? []) {
       const title = CONTENT_BY_ID.get(id);
       if (title && !cleared.some((entry) => entry.item.id === id)) cleared.push({ item: title, units: 0 });
     }
-    if (serverCleared?.length || needsConfirmation(impact)) {
-      setPendingUnwatch({ item, episode, laterEpisodes: impact.laterEpisodes, cleared, serverAsked: Boolean(serverCleared?.length) });
+    // The Undo of "Mark all N remaining" removes the episodes it added: no need to ask about those.
+    const unexpectedLater = impact.laterEpisodes.filter((later) => !expectedLater.includes(later));
+    if (serverCleared?.length || needsConfirmation({ laterEpisodes: unexpectedLater, cleared: impact.cleared })) {
+      setPendingUnwatch({ item, episode, laterEpisodes: impact.laterEpisodes, cleared, serverAsked: Boolean(serverCleared?.length), restoreSkip });
       return;
     }
-    runAction({ type: "unwatch", contentId: item.id, episode });
+    runAction(unwatchAction(item, episode, restoreSkip));
   }
 
   function toggle(item: ContentItem, episode: number, value: boolean) {
@@ -975,15 +1157,73 @@ export default function MarvelNexus({ request = browserApiRequest }: { request?:
 
   function confirmUnwatch() {
     if (!pendingUnwatch) return;
-    const { item, episode, cleared } = pendingUnwatch;
+    const { item, episode, cleared, restoreSkip } = pendingUnwatch;
     setPendingUnwatch(null);
-    runAction({ type: "unwatch", contentId: item.id, episode }, cleared.map((entry) => entry.item.id));
+    runAction(unwatchAction(item, episode, restoreSkip), cleared.map((entry) => entry.item.id));
   }
 
-  /** The toast's Undo: the matching un-watch, through the same confirmation as any other. */
-  function undoCheckpoint(target: { contentId: string; episode: number }) {
+  /** The toast's Undo: the matching un-watch (restoring a skip the watch ended), through the same confirmation as any other. */
+  function undoCheckpoint(target: UndoTarget) {
     const item = CONTENT_BY_ID.get(target.contentId);
-    if (item) requestUnwatch(item, target.episode);
+    if (item) requestUnwatch(item, target.episode, undefined, target.restoreSkip, target.addedEpisodes);
+  }
+
+  /** Skipping always asks first: the dialog says what the skip opens and that it is not "watched". */
+  function requestSkip(item: ContentItem) {
+    setPendingSkip(item);
+  }
+
+  function confirmSkip() {
+    const item = pendingSkip;
+    setPendingSkip(null);
+    if (item) runAction({ type: "skip", contentId: item.id });
+  }
+
+  /** Un-skipping clears nothing, so it needs no question; the rules refuse it while later watched titles rely on the skip. */
+  function unskip(item: ContentItem) {
+    runAction({ type: "unskip", contentId: item.id });
+  }
+
+  /** Every remaining episode of a series at once (the drawer's "Mark all N remaining"). */
+  function watchAll(item: ContentItem) {
+    runAction({ type: "watchAll", contentId: item.id });
+  }
+
+  /** Opens the catch-up wizard (2.3), fresh or from where it was left. */
+  function openCatchUp(draft: CatchUpDraft = EMPTY_CATCH_UP, failure: CatchUpFailure | null = null) {
+    setCatchUp({ draft, failure });
+  }
+
+  /**
+   * The wizard's one bulk action. It is closed over every prerequisite, so the rules accept it; if
+   * they still refuse it here, the wizard stays open and shows why. Applied, it closes, and it comes
+   * back at Review if the server refuses the action later (see `onSyncEvent`).
+   */
+  function confirmCatchUp(action: Action, draft: CatchUpDraft): CatchUpFailure | null {
+    const result = runAction(action, undefined, { quiet: true });
+    if (!result.ok) {
+      const { code, message, contentId, missingId } = result.failure;
+      return { code, message, contentId, missingId };
+    }
+    lastCatchUpRef.current = { action, draft };
+    setCatchUp(null);
+    return null;
+  }
+
+  /** "How it works": the lore guide, then back to the wizard where it was left. */
+  function catchUpHowItWorks(draft: CatchUpDraft) {
+    catchUpAfterLoreRef.current = draft;
+    setCatchUp(null);
+    setLoreOpen(true);
+  }
+
+  function closeLore() {
+    setLoreOpen(false);
+    const draft = catchUpAfterLoreRef.current;
+    if (draft) {
+      catchUpAfterLoreRef.current = null;
+      openCatchUp(draft);
+    }
   }
 
   /** What the background sync has to tell the user: a refusal, a fresh confirmation, or a lost session. */
@@ -992,15 +1232,28 @@ export default function MarvelNexus({ request = browserApiRequest }: { request?:
     setDelightToasts([]);
     if (event.type === "rejected") {
       showNotice(rejectionNotice(event.rejected, event.removed), 9000);
+      // A catch-up the server refused: back to its Review step, with the reason and a way to fix it.
+      const sent = lastCatchUpRef.current;
+      const lost = sent ? [event.rejected, ...event.removed].find((dropped) => dropped.entry.action === sent.action) : undefined;
+      if (sent && lost) {
+        lastCatchUpRef.current = null;
+        setSelected(null);
+        setPendingUnwatch(null);
+        setPendingSkip(null);
+        setAccountOpen(false);
+        openCatchUp({ ...sent.draft, step: "review" }, lost.failure);
+      }
     } else if (event.type === "confirm-required") {
       if (event.removed.length) showNotice(removedNotice(event.removed), 9000);
       const { action } = event.entry;
       const item = action.type === "unwatch" ? CONTENT_BY_ID.get(action.contentId) : undefined;
-      if (action.type === "unwatch" && item) requestUnwatch(item, action.episode, event.cleared);
+      if (action.type === "unwatch" && item) requestUnwatch(item, action.episode, event.cleared, action.restoreSkip);
     } else {
       setSelected(null);
       setAccountOpen(false);
       setPendingUnwatch(null);
+      setPendingSkip(null);
+      setCatchUp(null);
       setUser(null);
       setSignedOutNotice(
         event.lost
@@ -1056,13 +1309,13 @@ export default function MarvelNexus({ request = browserApiRequest }: { request?:
       window.cancelAnimationFrame(frame);
       observer?.disconnect();
     };
-  }, [user, nextRequired, universe, requirementFilter, formatFilter, unwatchedOnly, searchQuery]);
+  }, [user, nextRequired, universe, requirementFilter, formatFilter, progressFilter, searchQuery]);
 
   const selectUniverse = useCallback((nextUniverse: Universe) => {
     setUniverse(nextUniverse);
     setRequirementFilter("all");
     setFormatFilter("all");
-    setUnwatchedOnly(false);
+    setProgressFilter("all");
     setSearchQuery("");
   }, []);
 
@@ -1089,7 +1342,7 @@ export default function MarvelNexus({ request = browserApiRequest }: { request?:
     }
 
     function onKeyDown(event: globalThis.KeyboardEvent) {
-      const anotherDialogOpen = Boolean(selected || loreOpen || pendingUnwatch || accountOpen);
+      const anotherDialogOpen = Boolean(selected || loreOpen || pendingUnwatch || pendingSkip || accountOpen || catchUp);
       if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") {
         event.preventDefault();
         if (anotherDialogOpen) return;
@@ -1120,7 +1373,7 @@ export default function MarvelNexus({ request = browserApiRequest }: { request?:
 
     document.addEventListener("keydown", onKeyDown);
     return () => document.removeEventListener("keydown", onKeyDown);
-  }, [paletteOpen, selected, loreOpen, pendingUnwatch, accountOpen, nextRequired, selectUniverse]);
+  }, [paletteOpen, selected, loreOpen, pendingUnwatch, pendingSkip, accountOpen, catchUp, nextRequired, selectUniverse]);
 
   if (loading) return <LoadingScreen />;
   if (loadError) return <main className="loading-screen error-screen"><Zap size={34} /><p className="eyebrow">ARCHIVE LINK INTERRUPTED</p><h1>{loadError}</h1><button className="primary-action" onClick={loadProgress}>Retry connection <ArrowRight size={17} /></button></main>;
@@ -1133,6 +1386,8 @@ export default function MarvelNexus({ request = browserApiRequest }: { request?:
   const offline = progress.status === "offline";
   // "idle" once every change is saved; the browser tests wait for it before reloading.
   const syncState = offline ? "offline" : progress.outbox.length ? "saving" : "idle";
+  // Nothing watched or skipped yet: the archive offers the catch-up wizard (2.3).
+  const noProgress = viewing.watched.size === 0 && viewing.skipped.size === 0;
 
   return (
     <main className="app-shell" data-universe={universe} data-sync={syncState}>
@@ -1177,7 +1432,7 @@ export default function MarvelNexus({ request = browserApiRequest }: { request?:
         <section className="progress-overview global-status-row">
           <div className="status-primary doomsday-progress glass-panel">
             <ProgressReactor value={doomsdayStats.percent} tone="global" />
-            <div className="status-copy"><div className="status-label"><p className="eyebrow">UNIVERSAL DOOMSDAY READINESS</p><span>GLOBAL</span></div><h2>{doomsdayComplete ? "Doomsday protocol complete" : "Mission in progress"}</h2><p>{checkpointBreakdown(doomsdayStats)} · required checkpoints</p><CheckpointCounts watched={doomsdayStats.watchedUnits} total={doomsdayStats.totalUnits} /></div>
+            <div className="status-copy"><div className="status-label"><p className="eyebrow">UNIVERSAL DOOMSDAY READINESS</p><span>GLOBAL</span></div><h2>{doomsdayComplete ? "Doomsday protocol complete" : "Mission in progress"}</h2><p>{checkpointBreakdown(doomsdayStats)} · required checkpoints</p><CheckpointCounts watched={doomsdayStats.watchedUnits} remaining={doomsdayStats.remainingUnits} skipped={doomsdayStats.skippedUnits} /></div>
           </div>
           <div className="metric-card runtime-card doomsday-runtime glass-panel"><Clock3 size={22} /><div><span className="scope-pill">GLOBAL</span><small>DOOMSDAY WATCH TIME LEFT</small><strong>{formatDuration(doomsdayStats.remainingRuntime)}</strong><em>MCU + X-MEN REQUIRED ONLY{doomsdayStats.pendingRuntime ? " · PLUS UNRELEASED RUNTIME" : ""}</em>
             <PacePlanner remainingSeconds={doomsdayStats.remainingRuntime} daysLeft={daysUntilDoomsday} complete={doomsdayComplete} />
@@ -1194,7 +1449,7 @@ export default function MarvelNexus({ request = browserApiRequest }: { request?:
         <section className="status-deck metric-deck local-status-row">
           <div className="status-primary track-status glass-panel">
             <ProgressReactor value={trackStats.percent} tone="local" />
-            <div className="status-copy"><p className="eyebrow">CURRENT TAB ARCHIVE</p><h2>{universe === "mcu" ? "MCU completion" : universe === "xmen" ? "X-Men completion" : "Street Saga completion"}</h2><p>{checkpointBreakdown(trackStats)} • optional included</p><CheckpointCounts watched={trackStats.watchedUnits} total={trackStats.totalUnits} /></div>
+            <div className="status-copy"><p className="eyebrow">CURRENT TAB ARCHIVE</p><h2>{universe === "mcu" ? "MCU completion" : universe === "xmen" ? "X-Men completion" : "Street Saga completion"}</h2><p>{checkpointBreakdown(trackStats)} • optional included</p><CheckpointCounts watched={trackStats.watchedUnits} remaining={trackStats.remainingUnits} skipped={trackStats.skippedUnits} /></div>
           </div>
           <div className="counter-grid glass-panel">
             <div className="counter-cell"><Film size={18} /><div><small>MOVIES</small><strong>{trackStats.watchedMovies}<span> / {trackStats.movies}</span></strong></div></div>
@@ -1219,6 +1474,16 @@ export default function MarvelNexus({ request = browserApiRequest }: { request?:
       </section>
 
       <section className="dashboard-content archive-content">
+        {noProgress && (
+          <section className="catchup-prompt" aria-label="Catch up">
+            <ListChecks size={22} />
+            <div>
+              <strong>Already watched some of these?</strong>
+              <p>Pick the latest title you have seen in each timeline and mark everything up to it in one go.</p>
+            </div>
+            <button type="button" className="primary-action" onClick={() => openCatchUp()}>Catch up <ArrowRight size={16} /></button>
+          </section>
+        )}
         <div className="archive-heading">
           <div><p className="eyebrow">ARCHIVE // {universe === "mcu" ? "MARVEL CINEMATIC UNIVERSE" : universe === "xmen" ? "LEGACY MUTANT UNIVERSE" : "NEW YORK STREET-LEVEL CONTINUITY"}</p><h2>{universe === "mcu" ? "The Infinity & Multiverse Sagas" : universe === "xmen" ? "The X-Men Film Timeline" : "The Street-Level Saga"}</h2></div>
           <div className="archive-tools">
@@ -1231,7 +1496,7 @@ export default function MarvelNexus({ request = browserApiRequest }: { request?:
                 {([['all', 'All'], ['movie', 'Movies'], ['series', 'TV shows'], ['special', 'Specials']] as [FormatFilter, string][]).map(([value, label]) => <button key={value} aria-pressed={formatFilter === value} className={formatFilter === value ? "active" : ""} onClick={() => setFormatFilter(value)}>{label}</button>)}
               </div></div>
               <div className="filter-group"><span>Progress</span><div className="filter-row progress-filter" role="group" aria-label="Filter by viewing progress">
-                <button aria-pressed={unwatchedOnly} className={unwatchedOnly ? "active" : ""} onClick={() => setUnwatchedOnly((current) => !current)}>Unwatched</button>
+                {([['unwatched', 'Unwatched'], ['skipped', 'Skipped']] as [ProgressFilter, string][]).map(([value, label]) => <button key={value} aria-pressed={progressFilter === value} className={progressFilter === value ? "active" : ""} onClick={() => setProgressFilter((current) => (current === value ? "all" : value))}>{label}</button>)}
               </div></div>
             </div>
           </div>
@@ -1251,18 +1516,20 @@ export default function MarvelNexus({ request = browserApiRequest }: { request?:
                 onOpen={() => setSelected(item)}
                 onOpenPrerequisite={openArchiveItem}
                 onToggle={toggle}
+                onSkip={requestSkip}
+                onUnskip={unskip}
                 watchUrl={watchCatalogue.links.get(normalizeWatchTitle(item.title))}
                 watchLinksLoaded={watchCatalogue.loaded}
               />
             </Fragment>
           ))}
-          {!visibleItems.length && <div className="empty-state"><Search size={28} /><h3>No transmissions found</h3><p>Try another title or clear the active filters.</p><button onClick={() => { setSearchQuery(""); setRequirementFilter("all"); setFormatFilter("all"); setUnwatchedOnly(false); }}>Reset archive view</button></div>}
+          {!visibleItems.length && <div className="empty-state"><Search size={28} /><h3>No transmissions found</h3><p>Try another title or clear the active filters.</p><button onClick={() => { setSearchQuery(""); setRequirementFilter("all"); setFormatFilter("all"); setProgressFilter("all"); }}>Reset archive view</button></div>}
         </section>
       </section>
 
       <footer><div className="brand-lockup compact"><div className="brand-mark"><span>D</span></div><div><strong>DOOM FLIX</strong><small>WATCH PROTOCOL</small></div></div><p>Personal viewing archive • Release-order spoiler protection active • Developed by Abdul Rehman Shahid</p><span><Database size={14} /> {CONTENT.length} transmissions indexed</span></footer>
 
-      {selected && <DetailDrawer key={selected.id} item={selected} viewing={viewing} now={now} outOfOrder={outOfOrder.has(selected.id)} pending={progress.pending} onClose={() => setSelected(null)} onOpenPrerequisite={openArchiveItem} onToggle={toggle} watchUrl={watchCatalogue.links.get(normalizeWatchTitle(selected.title))} watchLinksLoaded={watchCatalogue.loaded} />}
+      {selected && <DetailDrawer key={selected.id} item={selected} viewing={viewing} now={now} outOfOrder={outOfOrder.has(selected.id)} pending={progress.pending} onClose={() => setSelected(null)} onOpenPrerequisite={openArchiveItem} onToggle={toggle} onWatchAll={watchAll} onSkip={requestSkip} onUnskip={unskip} watchUrl={watchCatalogue.links.get(normalizeWatchTitle(selected.title))} watchLinksLoaded={watchCatalogue.loaded} />}
       {loreOpen && (
         <LoreExperience
           viewing={viewing}
@@ -1271,7 +1538,18 @@ export default function MarvelNexus({ request = browserApiRequest }: { request?:
           daysLeft={daysUntilDoomsday}
           nextUp={nextRequired}
           onOpenItem={openArchiveItem}
-          onExit={() => setLoreOpen(false)}
+          onExit={closeLore}
+        />
+      )}
+      {catchUp && (
+        <CatchUpWizard
+          state={viewingState}
+          now={now}
+          initial={catchUp.draft}
+          failure={catchUp.failure}
+          onClose={() => setCatchUp(null)}
+          onHowItWorks={catchUpHowItWorks}
+          onConfirm={confirmCatchUp}
         />
       )}
       {paletteOpen && (
@@ -1285,6 +1563,15 @@ export default function MarvelNexus({ request = browserApiRequest }: { request?:
         />
       )}
       {pendingUnwatch && <UnwatchConfirmation pending={pendingUnwatch} onCancel={() => setPendingUnwatch(null)} onConfirm={confirmUnwatch} />}
+      {pendingSkip && (
+        <SkipConfirmation
+          item={pendingSkip}
+          impact={skipImpact(viewingState, pendingSkip.id, new Date(now))}
+          recap={recapOf(pendingSkip.id)}
+          onCancel={() => setPendingSkip(null)}
+          onConfirm={confirmSkip}
+        />
+      )}
       {accountOpen && (
         <AccountPanel
           username={user.username}
@@ -1294,6 +1581,10 @@ export default function MarvelNexus({ request = browserApiRequest }: { request?:
           onClose={() => setAccountOpen(false)}
           onRecoveryCodeChanged={() => setHasRecoveryCode(true)}
           onSignedOut={handleSignedOutByPanel}
+          onCatchUp={() => {
+            setAccountOpen(false);
+            openCatchUp();
+          }}
         />
       )}
       {notice && <div className="toast" role="status" aria-live="polite"><Zap size={16} /> {notice}</div>}

@@ -1,11 +1,11 @@
 "use client";
 
 import Image from "next/image";
-import { Check, Compass, LockKeyhole, Orbit } from "lucide-react";
+import { Check, Compass, LockKeyhole, Orbit, SkipForward } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
 
 import { CONTENT, type ContentItem, type Universe } from "@/lib/content";
-import { isWatchedComplete, lockReason, type ViewingIndex } from "@/lib/engine/state";
+import { isSkipped, isWatchedComplete, lockReason, type ViewingIndex } from "@/lib/engine/state";
 import { posterUrl } from "@/lib/media";
 import { useDialogBehavior } from "@/lib/use-motion";
 
@@ -102,6 +102,8 @@ export function CommandPalette({
         <div ref={listRef} className="palette-results">
           {results.map((item, index) => {
             const complete = isWatchedComplete(item, viewing);
+            // A skipped title is cleared, not watched: its own mark, and never the lock.
+            const skipped = isSkipped(item, viewing);
             // Same rule as the cards: a series waiting for its episode list is not drawn as locked.
             const lock = lockReason(item, viewing, now);
             const unlocked = lock === null || lock.kind === "pending";
@@ -118,7 +120,7 @@ export function CommandPalette({
                   <strong>{item.title}</strong>
                   <small>{UNIVERSE_TAGS[item.universe]} · {item.phase}</small>
                 </span>
-                <span className="palette-state" aria-hidden="true">{complete ? <Check size={14} /> : !unlocked ? <LockKeyhole size={13} /> : null}</span>
+                <span className="palette-state" aria-hidden="true">{complete ? <Check size={14} /> : skipped ? <SkipForward size={13} /> : !unlocked ? <LockKeyhole size={13} /> : null}</span>
               </button>
             );
           })}

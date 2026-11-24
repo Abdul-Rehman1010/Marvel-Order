@@ -2,7 +2,7 @@
 
 import { PartyPopper, Sparkles, Undo2, X } from "lucide-react";
 
-import type { ToastSpec } from "@/lib/client/feedback";
+import type { ToastSpec, UndoTarget } from "@/lib/client/feedback";
 import type { ContentItem } from "@/lib/content";
 
 /** What `actionToasts` (src/lib/client/feedback.ts) produces for an action. */
@@ -26,8 +26,8 @@ export function ToastStack({
   toasts: DelightToast[];
   onDismiss: (id: number) => void;
   onOpenItem: (item: ContentItem) => void;
-  /** The checkpoint toast's Undo: un-watch the unit it names. */
-  onUndo: (target: { contentId: string; episode: number }) => void;
+  /** The checkpoint toast's Undo: un-watch the unit it names (and restore a skip the watch ended). */
+  onUndo: (target: UndoTarget) => void;
 }) {
   if (!toasts.length) return null;
   return (

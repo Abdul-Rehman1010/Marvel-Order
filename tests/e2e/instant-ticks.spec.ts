@@ -73,6 +73,9 @@ test("the checkpoint toast offers Undo for six seconds", async ({ page }, testIn
   await useOwnClientIp(page, testInfo);
   await page.clock.install();
   await openDashboard(page, testInfo);
+  // Stop the page clock, so only `runFor` moves it. An installed clock otherwise keeps running in
+  // real time, and the re-render after a tick (about a second in dev mode) would eat the margin.
+  await page.clock.pauseAt(await page.evaluate(() => Date.now() + 1_000));
 
   await markButton(page, "iron-man").click();
   const toast = page.locator(".delight-toast.checkpoint");

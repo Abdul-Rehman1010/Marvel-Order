@@ -57,6 +57,11 @@ function drawAction(rnd: () => number, state: ViewingState, withSkips: boolean):
   }
   if (roll < 0.68 && state.rows.length) {
     const row = pick(rnd, state.rows);
+    // With skips on, a quarter of the un-watches are the Undo of "Watch anyway" (package 2.2),
+    // which puts a skip back. Skip-free walks draw exactly the same numbers as before.
+    if (withSkips && rnd() < 0.25) {
+      return { type: "unwatch", contentId: row.contentId, episode: row.episode, restoreSkip: rnd() < 0.5 ? "manual" : "triage" };
+    }
     return { type: "unwatch", contentId: row.contentId, episode: row.episode };
   }
   if (roll < 0.8) {

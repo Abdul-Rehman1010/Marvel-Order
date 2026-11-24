@@ -146,7 +146,10 @@ export function useGlassSpotlight() {
   }, []);
 }
 
-/** Focus trap + Escape-to-close + body-scroll-lock + focus-restore for a modal dialog/drawer. Shared by every drawer, confirmation dialog, and the command palette. */
+/**
+ * Focus trap + Escape-to-close + body-scroll-lock + focus-restore for a modal dialog/drawer. Shared by every drawer, confirmation dialog, and the command palette.
+ * On open, focus goes to the element marked `data-autofocus` if there is one, otherwise to the first control.
+ */
 export function useDialogBehavior(onClose: () => void) {
   const dialogRef = useRef<HTMLElement>(null);
   const onCloseRef = useRef(onClose);
@@ -162,7 +165,8 @@ export function useDialogBehavior(onClose: () => void) {
 
     const dialog = dialogRef.current;
     window.requestAnimationFrame(() => {
-      const firstControl = dialog?.querySelector<HTMLElement>('button:not([disabled]), [href], input:not([disabled])');
+      const chosen = dialog?.querySelector<HTMLElement>("[data-autofocus]:not([disabled])");
+      const firstControl = chosen ?? dialog?.querySelector<HTMLElement>('button:not([disabled]), [href], input:not([disabled])');
       (firstControl ?? dialog)?.focus();
     });
 

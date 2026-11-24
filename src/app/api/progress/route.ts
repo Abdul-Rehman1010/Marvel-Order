@@ -18,7 +18,8 @@ const idList = z.array(contentId).max(500);
 // `import` is deliberately absent: it gets its own route with its own limits in package 4.1.
 const actionSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("watch"), contentId, episode }),
-  z.object({ type: z.literal("unwatch"), contentId, episode }),
+  // `restoreSkip` (2.2): the Undo of a watch that ended a skip puts the skip back in the same step.
+  z.object({ type: z.literal("unwatch"), contentId, episode, restoreSkip: skipReason.optional() }),
   z.object({ type: z.literal("watchAll"), contentId }),
   z.object({ type: z.literal("skip"), contentId, reason: skipReason.optional() }),
   z.object({ type: z.literal("unskip"), contentId }),

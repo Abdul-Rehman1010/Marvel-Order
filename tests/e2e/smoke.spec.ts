@@ -22,11 +22,18 @@ test("sign up, mark Iron Man, reload, un-watch, sign out", async ({ page }, test
   await codeDialog.getByLabel("I have saved this code somewhere safe").check();
   await codeDialog.getByRole("button", { name: "Continue" }).click();
 
-  // A new account lands on the lore guide first; close it to reach the dashboard.
+  // A new account lands on the catch-up wizard (package 2.3). Its "How it works" link shows the lore
+  // guide and comes back to the wizard; close it to reach the dashboard.
+  const wizard = page.getByRole("dialog", { name: "Catch up on what you've watched" });
+  await expect(wizard).toBeVisible();
+  await wizard.getByRole("button", { name: "How it works" }).click();
   const guide = page.getByRole("dialog", { name: "Doom Flix guide" });
   await expect(guide).toBeVisible();
   await page.getByRole("button", { name: "Back to dashboard" }).click();
   await expect(guide).toBeHidden();
+  await expect(wizard).toBeVisible();
+  await wizard.getByRole("button", { name: "Close catch-up" }).click();
+  await expect(wizard).toBeHidden();
   // The operator name is hidden on phones, so use the Log out button to know we are signed in.
   await expect(page.getByRole("button", { name: "Log out" })).toBeVisible();
 

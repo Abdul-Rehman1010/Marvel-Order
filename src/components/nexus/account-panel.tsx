@@ -1,6 +1,6 @@
 "use client";
 
-import { Database, KeyRound, LogOut, ShieldCheck, Trash2, UserRound, X } from "lucide-react";
+import { Database, KeyRound, ListChecks, LogOut, ShieldCheck, Trash2, UserRound, X } from "lucide-react";
 import { type FormEvent, useId, useState } from "react";
 
 import { useDialogBehavior } from "@/lib/use-motion";
@@ -22,6 +22,7 @@ export function AccountPanel({
   onClose,
   onRecoveryCodeChanged,
   onSignedOut,
+  onCatchUp,
 }: {
   username: string;
   databaseMode: string;
@@ -31,6 +32,8 @@ export function AccountPanel({
   onRecoveryCodeChanged: () => void;
   /** After "Sign out everywhere" or "Delete account": this device is signed out too. */
   onSignedOut: (message: string) => void;
+  /** Opens the catch-up wizard (package 2.3) in place of the panel. */
+  onCatchUp?: () => void;
 }) {
   const dialogRef = useDialogBehavior(onClose);
   const id = useId();
@@ -126,6 +129,14 @@ export function AccountPanel({
             {synced ? " · Progress is saved online and follows you to any device you sign in on." : " · Progress is saved in a database file on the computer running this app."}
           </span>
         </div>
+
+        {onCatchUp && (
+          <section className="account-section catch-up-entry">
+            <h3><ListChecks size={16} /> Catch up</h3>
+            <p>Mark everything you have already seen in one go: pick the latest title you watched in each timeline.</p>
+            <button type="button" className="secondary-action" onClick={onCatchUp}>Catch up on what you&apos;ve watched</button>
+          </section>
+        )}
 
         <label className="account-field">
           Current password

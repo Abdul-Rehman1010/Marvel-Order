@@ -9,8 +9,9 @@
  * - Percent is by runtime: watched ÷ (watched + remaining). It is capped at 99 until every
  *   counted title is satisfied (watched or skipped), and is exactly 100 from then on.
  */
+import { CONTENT_BY_ID } from "../catalogue";
 import type { ContentItem } from "../catalogue/types";
-import { isSatisfied, isWatchedComplete, progressKey, type ViewingIndex } from "./state";
+import { isSatisfied, isUnitOf, isWatchedComplete, progressKey, type ViewingIndex, type ViewingState } from "./state";
 
 export type Stats = {
   /** 0–100. 100 exactly when `complete`. */
@@ -116,4 +117,27 @@ export function getStats(items: readonly ContentItem[], index: ViewingIndex, opt
     remainingEpisodes,
     pendingRuntime: tracked.some(isPending),
   };
+}
+
+const DAY_MS = 86_400_000;
+
+/**
+ * How much the user has really been watching: runtime per day over the `days` days up to `now`.
+ * Rows marked by catch-up are `backfilled` and left out (§4.1), so marking forty titles at once is
+ * not a forty-title day. Rows the catalogue does not recognise are ignored. Package 3.3 builds the
+ * "at your recent pace you finish on …" line on it.
+ */
+export function recentPace(state: ViewingState, now: Date | number, days = 14) {
+  const end = typeof now === "number" ? now : now.getTime();
+  const start = end - days * DAY_MS;
+  let watchedSeconds = 0;
+  for (const row of state.rows) {
+    if (row.backfilled) continue;
+    const at = Date.parse(row.watchedAt);
+    if (!(at > start && at <= end)) continue;
+    const item = CONTENT_BY_ID.get(row.contentId);
+    if (!item || !isUnitOf(item, row.episode)) continue;
+    watchedSeconds += item.kind === "series" ? (item.episodes?.find((episode) => episode.id === row.episode)?.runtimeSec ?? 0) : item.runtimeSec;
+  }
+  return { days, watchedSeconds, minutesPerDay: watchedSeconds / 60 / days };
 }

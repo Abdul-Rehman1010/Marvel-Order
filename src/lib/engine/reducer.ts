@@ -11,6 +11,8 @@
  * - Un-watching is always allowed, even on a locked title, so out-of-order rows can be removed.
  * - Un-watching clears the watched rows of every dependent title, but only when it makes a
  *   satisfied title unsatisfied. Skips are never removed by a cascade.
+ * - `unwatch` with `restoreSkip` (package 2.2) is the Undo of a watch that ended a skip: the skip
+ *   comes back in the same step, so the title stays satisfied and nothing later is cleared.
  * - Rows and skips the catalogue does not recognise are carried through untouched.
  */
 import { CONTENT_BY_ID } from "../catalogue";
@@ -32,7 +34,12 @@ import {
 
 export type Action =
   | { type: "watch"; contentId: string; episode: number }
-  | { type: "unwatch"; contentId: string; episode: number }
+  /**
+   * `restoreSkip`: the Undo of a watch that ended a skip. When the unit is removed, the title is
+   * skipped again with this reason (if it is not already), before the cascade check, so later
+   * titles keep their progress. Without it, un-watching behaves as it always did.
+   */
+  | { type: "unwatch"; contentId: string; episode: number; restoreSkip?: SkipReason }
   /** Every remaining unit of one title. */
   | { type: "watchAll"; contentId: string }
   | { type: "skip"; contentId: string; reason?: SkipReason }
@@ -211,13 +218,17 @@ function watchAllUnits(draft: Draft, item: ContentItem, now: Date, backfilled: b
   return null;
 }
 
-function unwatchUnit(draft: Draft, item: ContentItem, episode: number) {
+function unwatchUnit(draft: Draft, item: ContentItem, episode: number, now: Date, restoreSkip?: SkipReason) {
   if (!isUnitOf(item, episode)) return unknownEpisode(item, episode);
-  if (!draft.watched.has(progressKey(item.id, episode))) return null; // nothing to remove, and no cascade
+  if (!draft.watched.has(progressKey(item.id, episode))) return null; // nothing to remove, no cascade, no skip
 
   const wasSatisfied = isSatisfied(item, draft);
   // A series keeps a 1..n prefix: removing episode k also removes the later ones.
   draft.removeUnits(item, item.kind === "series" ? unitEpisodes(item).filter((candidate) => candidate >= episode) : [episode]);
+  // The title has lost at least one unit, so it is no longer fully watched and may be skipped.
+  if (restoreSkip && !draft.skipped.has(item.id)) {
+    draft.addSkip({ contentId: item.id, reason: restoreSkip, skippedAt: now.toISOString() });
+  }
 
   if (wasSatisfied && !isSatisfied(item, draft)) {
     for (const id of dependents(item.id)) {
@@ -347,7 +358,7 @@ export function applyAction(state: ViewingState, action: Action, now: Date): Out
       failure = watchUnit(draft, item, action.episode, now, { watchedAt: now.toISOString(), backfilled: false });
       break;
     case "unwatch":
-      failure = unwatchUnit(draft, item, action.episode);
+      failure = unwatchUnit(draft, item, action.episode, now, action.restoreSkip);
       break;
     case "watchAll":
       failure = watchAllUnits(draft, item, now, false);

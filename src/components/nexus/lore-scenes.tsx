@@ -1,7 +1,7 @@
 "use client";
 
 import Image from "next/image";
-import { Check, ChevronDown, Lock, Star } from "lucide-react";
+import { Check, ChevronDown, Lock, SkipForward, Star } from "lucide-react";
 import { useMemo, type CSSProperties } from "react";
 
 import {
@@ -10,7 +10,7 @@ import {
   getPrerequisiteChain,
   type ContentItem,
 } from "@/lib/content";
-import { isWatchedComplete, type ViewingIndex } from "@/lib/engine/state";
+import { isSkipped, isWatchedComplete, type ViewingIndex } from "@/lib/engine/state";
 import { backdropUrl, posterUrl } from "@/lib/media";
 import { POSTER_TINTS, DEFAULT_TINT } from "@/lib/poster-tints";
 
@@ -74,7 +74,11 @@ export function OrderScene({ viewing }: LoreSceneProps) {
             <Poster item={item} sizes="130px" />
             <div className="lore-strip-tag">
               <span className="lore-strip-number">{String(index + 1).padStart(2, "0")}</span>
-              {isWatchedComplete(item, viewing) && <span className="lore-strip-check"><Check size={12} /></span>}
+              {isWatchedComplete(item, viewing) ? (
+                <span className="lore-strip-check"><Check size={12} /></span>
+              ) : isSkipped(item, viewing) ? (
+                <span className="lore-strip-check skipped"><SkipForward size={11} /></span>
+              ) : null}
             </div>
             <small>{item.year}</small>
           </div>

@@ -17,14 +17,16 @@ import {
   indexOf,
   isOutstanding,
   isSatisfied,
+  isSkipped,
   isWatchedComplete,
   lockReason,
   missingPrerequisite,
   outOfOrderTitles,
   unrecognisedIds,
+  unskipBlockers,
   type ViewingState,
 } from "@/lib/engine/state";
-import { getStats } from "@/lib/engine/stats";
+import { getStats, recentPace } from "@/lib/engine/stats";
 
 import {
   EARLIER,
@@ -338,6 +340,80 @@ describe("skip and unskip", () => {
   });
 });
 
+describe("skipped state helpers and the Undo of 'Watch anyway' (package 2.2)", () => {
+  const triageSkip = (contentId: string): Action => ({ type: "skip", contentId, reason: "triage" });
+  const undoOf = (contentId: string, episode = -1, restoreSkip: "manual" | "triage" = "manual"): Action => ({ type: "unwatch", contentId, episode, restoreSkip });
+
+  it("isSkipped is a skip on a title that is not fully watched", () => {
+    const state = apply(watchedState(["iron-man", ["moon-knight", [1, 2]]]), skip("moon-knight")).state;
+    expect(isSkipped(item("moon-knight"), indexOf(state))).toBe(true);
+    expect(isSkipped(item("iron-man"), indexOf(state))).toBe(false);
+    // A skip row next to a fully watched title (the reducer never leaves one) is not "skipped".
+    const odd: ViewingState = { rows: rowsFor("iron-man"), skips: [{ contentId: "iron-man", reason: "manual", skippedAt: NOW.toISOString() }] };
+    expect(isSkipped(item("iron-man"), indexOf(odd))).toBe(false);
+  });
+
+  it("unskipBlockers names the watched later titles that rely on the skip, exactly when the reducer refuses", () => {
+    const skipped = apply(watchedState(["iron-man"]), skip("incredible-hulk")).state;
+    expect(unskipBlockers(item("incredible-hulk"), indexOf(skipped))).toEqual([]);
+    expect(apply(skipped, unskip("incredible-hulk")).removedSkips).toEqual(["incredible-hulk"]);
+
+    const relied = apply(skipped, watch("iron-man-2")).state;
+    const later = apply(relied, watch("thor")).state;
+    expect(unskipBlockers(item("incredible-hulk"), indexOf(later)).map((blocker) => blocker.id)).toEqual(["iron-man-2", "thor"]);
+    expect(refuse(later, unskip("incredible-hulk"))).toMatchObject({ code: "has-dependents" });
+
+    // A partly watched later series counts too.
+    const series = apply(watchedState([...SAGA_FILMS]), skip("wandavision")).state;
+    const started = apply(series, watch("falcon-winter-soldier", 1)).state;
+    expect(unskipBlockers(item("wandavision"), indexOf(started)).map((blocker) => blocker.id)).toEqual(["falcon-winter-soldier"]);
+  });
+
+  it("Undo of watching a skipped movie: the skip comes back with its reason, and later titles keep their progress", () => {
+    const skipped = apply(watchedState(["iron-man"]), triageSkip("incredible-hulk")).state;
+    const later = apply(apply(skipped, watch("iron-man-2")).state, watch("thor")).state;
+
+    // "Watch anyway": the title is now watched and its skip is gone.
+    const watched = apply(later, watch("incredible-hulk"));
+    expect(watched.removedSkips).toEqual(["incredible-hulk"]);
+
+    // Without restoreSkip the un-watch would clear everything after it...
+    expect(apply(watched.state, unwatch("incredible-hulk")).cleared).toEqual(["iron-man-2", "thor"]);
+    // ...with it, the title is skipped again in the same step and nothing else changes.
+    const undone = apply(watched.state, undoOf("incredible-hulk", -1, "triage"), new Date(NOW.getTime() + 5000));
+    expect(undone.cleared).toEqual([]);
+    expect(undone.removedKeys).toEqual(["incredible-hulk:-1"]);
+    expect(undone.addedSkips).toEqual([{ contentId: "incredible-hulk", reason: "triage", skippedAt: new Date(NOW.getTime() + 5000).toISOString() }]);
+    expect(keysOf(undone.state)).toEqual(keysOf(later));
+    expect(skippedIds(undone.state)).toEqual(["incredible-hulk"]);
+  });
+
+  it("Undo of the episode that finished a skipped series puts the skip back and keeps the earlier episodes", () => {
+    const base = apply(watchedState([...SAGA_FILMS, ["wandavision", [1, 2, 3, 4, 5, 6, 7, 8]]]), skip("wandavision")).state;
+    const later = apply(base, watch("falcon-winter-soldier", 1)).state;
+    const finished = apply(later, watch("wandavision", 9));
+    expect(finished.removedSkips).toEqual(["wandavision"]);
+
+    const undone = apply(finished.state, undoOf("wandavision", 9));
+    expect(undone.cleared).toEqual([]);
+    expect(rowsOf(undone.state, "wandavision")).toEqual([1, 2, 3, 4, 5, 6, 7, 8]);
+    expect(rowsOf(undone.state, "falcon-winter-soldier")).toEqual([1]);
+    expect(skippedIds(undone.state)).toEqual(["wandavision"]);
+  });
+
+  it("restoreSkip changes nothing when the unit is not watched, and adds no second skip", () => {
+    const quiet = apply(watchedState(["iron-man"]), undoOf("incredible-hulk"));
+    expect(quiet.state.skips).toEqual([]);
+    expect(quiet.addedSkips).toEqual([]);
+
+    // Still skipped (a series not finished yet): the existing skip row is kept as it is.
+    const skippedSeries = apply(watchedState([...SAGA_FILMS, ["wandavision", [1, 2, 3]]]), skip("wandavision")).state;
+    const outcome = apply(skippedSeries, undoOf("wandavision", 3, "triage"));
+    expect(outcome.addedSkips).toEqual([]);
+    expect(outcome.state.skips).toEqual(skippedSeries.skips);
+  });
+});
+
 describe("bulk", () => {
   const bulk = (watchIds: string[], skipIds: string[] = [], backfilled = true): Action => ({ type: "bulk", watch: watchIds, skip: skipIds, backfilled });
 
@@ -605,5 +681,42 @@ describe("stats", () => {
   it("optional titles count only when asked for", () => {
     const state = watchedState(["iron-man"]);
     expect(getStats(MCU_CONTENT, indexOf(state)).movies).toBeLessThan(getStats(MCU_CONTENT, indexOf(state), { includeOptional: true }).movies);
+  });
+});
+
+describe("recent pace (package 2.3: backfilled rows are not pace)", () => {
+  const daysAgo = (days: number) => new Date(NOW.getTime() - days * 86_400_000).toISOString();
+
+  it("counts the last 14 days of real watching, and leaves out what a catch-up marked", () => {
+    const caughtUp = apply(EMPTY_STATE, { type: "bulk", watch: requiredThrough(MCU_CONTENT, "endgame"), skip: [], backfilled: true }).state;
+    expect(caughtUp.rows.length).toBe(22);
+    expect(recentPace(caughtUp, NOW)).toEqual({ days: 14, watchedSeconds: 0, minutesPerDay: 0 });
+
+    // Two films watched for real this week (126 + 112 minutes); one a month ago does not count.
+    const state: ViewingState = {
+      rows: [
+        ...caughtUp.rows,
+        { contentId: "xmen-2000", episode: -1, watchedAt: daysAgo(2), backfilled: false },
+        { contentId: "x2", episode: -1, watchedAt: daysAgo(13.9), backfilled: false },
+        { contentId: "last-stand", episode: -1, watchedAt: daysAgo(30), backfilled: false },
+      ],
+      skips: [],
+    };
+    const pace = recentPace(state, NOW);
+    expect(pace.watchedSeconds).toBe((item("xmen-2000").runtimeSec + item("x2").runtimeSec));
+    expect(pace.minutesPerDay).toBeCloseTo(pace.watchedSeconds / 60 / 14);
+    expect(recentPace(state, NOW, 60).watchedSeconds).toBe(pace.watchedSeconds + item("last-stand").runtimeSec);
+  });
+
+  it("counts an episode's own runtime, and ignores rows the catalogue does not recognise", () => {
+    const state: ViewingState = {
+      rows: [
+        { contentId: "wandavision", episode: 1, watchedAt: daysAgo(1), backfilled: false },
+        { contentId: "wandavision", episode: 99, watchedAt: daysAgo(1), backfilled: false },
+        { contentId: "removed-title", episode: -1, watchedAt: daysAgo(1), backfilled: false },
+      ],
+      skips: [],
+    };
+    expect(recentPace(state, NOW).watchedSeconds).toBe(item("wandavision").episodes![0].runtimeSec);
   });
 });

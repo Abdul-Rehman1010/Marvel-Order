@@ -14,15 +14,17 @@ import {
   needsConfirmation,
   rejectionNotice,
   removedNotice,
+  skipImpact,
   unwatchImpact,
 } from "@/lib/client/feedback";
 import { createRemoteGateway, type LoadResult, type ProgressGateway, type SendResult } from "@/lib/client/gateway";
 import { foldOutbox, isTitlePending, isUnitPending, pendingKeysOf, recheckOutbox, type OutboxEntry } from "@/lib/client/outbox";
 import { createProgressStore, RETRY_BACKOFF_MS, type SyncEvent } from "@/lib/client/use-progress";
-import { MCU_CONTENT } from "@/lib/content";
+import { MCU_CONTENT, XMEN_CONTENT } from "@/lib/content";
 import { newlyUnlocked } from "@/lib/engine/milestones";
 import { applyAction, type Action } from "@/lib/engine/reducer";
 import { EMPTY_STATE, indexOf, type ViewingState } from "@/lib/engine/state";
+import { getStats } from "@/lib/engine/stats";
 
 import { NOW, apply, item, keysOf, requiredThrough, watchedState } from "../helpers/viewing";
 
@@ -271,6 +273,26 @@ describe("progress store", () => {
     await until(() => store.getSnapshot().outbox.length === 0, "the queue to drain");
     expect(server.received).toEqual([{ action: unwatch("iron-man"), confirmCleared: ["incredible-hulk"] }]);
     expect(server.state.rows).toEqual([]);
+  });
+
+  it("skip, watch anyway, then Undo with the skip restored: later titles keep their progress on the server too", async () => {
+    const { store, server } = setup(watchedState(["iron-man"]));
+    store.dispatch({ type: "skip", contentId: "incredible-hulk" });
+    store.dispatch(watch("iron-man-2"));
+    store.dispatch(watch("incredible-hulk"));
+    expect(store.getSnapshot().index.skipped.has("incredible-hulk")).toBe(false);
+
+    // The plain un-watch would clear Iron Man 2, so it is not allowed without confirming...
+    expect(store.dispatch(unwatch("incredible-hulk"))).toMatchObject({ ok: false, failure: { code: "confirm-required" } });
+    // ...the Undo puts the skip back instead, and clears nothing.
+    const undo: Action = { type: "unwatch", contentId: "incredible-hulk", episode: -1, restoreSkip: "manual" };
+    expect(store.dispatch(undo)).toMatchObject({ ok: true, changed: true, outcome: { cleared: [] } });
+    expect(store.getSnapshot().index.skipped.has("incredible-hulk")).toBe(true);
+
+    await until(() => store.getSnapshot().outbox.length === 0, "the queue to drain");
+    expect(server.received.at(-1)).toEqual({ action: undo, confirmCleared: [] });
+    expect(keysOf(server.state)).toEqual(["iron-man-2:-1", "iron-man:-1"]);
+    expect(server.state.skips.map((row) => row.contentId)).toEqual(["incredible-hulk"]);
   });
 
   it("sends an empty confirmed list with an un-watch that should clear nothing, and none with other actions", async () => {
@@ -651,7 +673,7 @@ describe("what the user is told", () => {
       kind: "checkpoint",
       title: "Checkpoint secured",
       detail: "2 episodes · 1h 37m closer to Doomsday",
-      undo: { contentId: "wandavision", episode: 8 },
+      undo: { contentId: "wandavision", episode: 8, addedEpisodes: [8, 9] },
     });
   });
 
@@ -667,16 +689,69 @@ describe("what the user is told", () => {
   });
 
   it("bulk: exactly one toast, listing every milestone reached", () => {
-    const action: Action = { type: "bulk", watch: requiredThrough(MCU_CONTENT, "ant-man"), skip: [], backfilled: true };
+    const action: Action = { type: "bulk", watch: requiredThrough(MCU_CONTENT, "ant-man"), skip: [], backfilled: false };
     const { before, after } = step(EMPTY_STATE, action);
     expect(actionToasts(action, before, after, NOW)).toEqual([
       { kind: "milestone", title: "Marked 12 titles watched", detail: "Phase One complete · Phase Two complete" },
     ]);
-    const small: Action = { type: "bulk", watch: ["iron-man", "incredible-hulk"], skip: ["eternals"], backfilled: true };
+    const small: Action = { type: "bulk", watch: ["iron-man", "incredible-hulk"], skip: ["eternals"], backfilled: false };
     const smallStep = step(EMPTY_STATE, small);
     expect(actionToasts(small, smallStep.before, smallStep.after, NOW)).toEqual([
       { kind: "checkpoint", title: "Marked 2 titles watched, skipped 1", detail: "3h 58m logged in your archive" },
     ]);
+  });
+
+  it("catch-up (a backfilled bulk): 'Caught up: N titles · readiness now P%', with every milestone", () => {
+    const readiness = (after: ReturnType<typeof indexOf>) => getStats([...MCU_CONTENT, ...XMEN_CONTENT], after).percent;
+    const action: Action = { type: "bulk", watch: requiredThrough(MCU_CONTENT, "ant-man"), skip: [], backfilled: true };
+    const { before, after } = step(EMPTY_STATE, action);
+    expect(readiness(after)).toBeGreaterThan(0);
+    expect(actionToasts(action, before, after, NOW)).toEqual([
+      { kind: "milestone", title: `Caught up: 12 titles · readiness now ${readiness(after)}%`, detail: "Phase One complete · Phase Two complete" },
+    ]);
+    const small: Action = { type: "bulk", watch: ["iron-man", "thor"], skip: ["incredible-hulk", "iron-man-2"], backfilled: true };
+    const smallStep = step(EMPTY_STATE, small);
+    expect(actionToasts(small, smallStep.before, smallStep.after, NOW)).toEqual([
+      { kind: "checkpoint", title: `Caught up: 2 titles, skipped 2 · readiness now ${readiness(smallStep.after)}%`, detail: "4h 01m logged in your archive" },
+    ]);
+  });
+
+  it("watching a skipped title: the Undo puts the skip back with its reason, and says so", () => {
+    const start = apply(watchedState(["iron-man", "iron-man-2"]), { type: "skip", contentId: "incredible-hulk", reason: "triage" }).state;
+    // (Iron Man 2 was watched while The Incredible Hulk was skipped.)
+    const { before, after } = step(start, watch("incredible-hulk"));
+    const [checkpoint] = actionToasts(watch("incredible-hulk"), before, after, NOW, start.skips);
+    expect(checkpoint).toEqual({
+      kind: "checkpoint",
+      title: "Checkpoint secured",
+      detail: "1h 52m closer to Doomsday · no longer skipped",
+      undo: { contentId: "incredible-hulk", episode: -1, restoreSkip: "triage" },
+    });
+
+    // That Undo clears nothing, so it needs no confirmation; a plain un-watch would ask.
+    const watched = apply(start, watch("incredible-hulk")).state;
+    expect(unwatchImpact(watched, "incredible-hulk", -1, NOW, "triage")).toEqual({ laterEpisodes: [], cleared: [] });
+    expect(unwatchImpact(watched, "incredible-hulk", -1, NOW)!.cleared.map(({ item: cleared }) => cleared.id)).toEqual(["iron-man-2"]);
+
+    const undo: Action = { type: "unwatch", contentId: "incredible-hulk", episode: -1, restoreSkip: "triage" };
+    const undone = step(watched, undo);
+    expect(actionToasts(undo, undone.before, undone.after, NOW)).toEqual([
+      { kind: "checkpoint", title: "Removed from watched", detail: "The Incredible Hulk · skipped again" },
+    ]);
+
+    // A title that was not skipped gets a plain Undo.
+    const plain = step(watchedState(["iron-man"]), watch("incredible-hulk"));
+    expect(actionToasts(watch("incredible-hulk"), plain.before, plain.after, NOW, [])[0]).toMatchObject({ undo: { contentId: "incredible-hulk", episode: -1 } });
+    expect(actionToasts(watch("incredible-hulk"), plain.before, plain.after, NOW, [])[0]).not.toHaveProperty("undo.restoreSkip");
+  });
+
+  it("skipImpact says what a skip would unlock and keep", () => {
+    expect(skipImpact(watchedState(["iron-man"]), "incredible-hulk", NOW)).toEqual({ unlocks: [item("iron-man-2")], keptUnits: 0 });
+    // Iron Man is not watched, so Iron Man 2 stays locked on it.
+    expect(skipImpact(EMPTY_STATE, "incredible-hulk", NOW)).toEqual({ unlocks: [], keptUnits: 0 });
+    const partial = watchedState([...SAGA, ["wandavision", [1, 2, 3]]]);
+    expect(skipImpact(partial, "wandavision", NOW)).toEqual({ unlocks: [item("falcon-winter-soldier")], keptUnits: 3 });
+    expect(skipImpact(EMPTY_STATE, "no-such-title", NOW)).toBeNull();
   });
 
   it("un-watch and un-skip say what changed; an action that changed nothing says nothing", () => {

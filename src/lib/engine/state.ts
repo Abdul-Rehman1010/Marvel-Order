@@ -11,7 +11,7 @@
  */
 import { CONTENT, CONTENT_BY_ID } from "../catalogue";
 import type { ContentItem } from "../catalogue/types";
-import { ancestors } from "./graph";
+import { ancestors, dependents } from "./graph";
 import { isReleased } from "./release";
 
 export type ProgressRow = { contentId: string; episode: number; watchedAt: string; backfilled: boolean };
@@ -102,6 +102,28 @@ export function isSatisfied(item: ContentItem, index: ViewingIndex): boolean {
 /** Not satisfied: what "remaining", "next up" and "unwatched" mean. */
 export function isOutstanding(item: ContentItem, index: ViewingIndex): boolean {
   return !isSatisfied(item, index);
+}
+
+/**
+ * Skipped and not fully watched: the title the app shows as "Skipped". (The reducer ends a skip
+ * when its title becomes fully watched, so in practice every skip is this.)
+ */
+export function isSkipped(item: ContentItem, index: ViewingIndex): boolean {
+  return index.skipped.has(item.id) && !isWatchedComplete(item, index);
+}
+
+/**
+ * The later titles with watched rows that rely on `item`'s skip, in catalogue order. While there
+ * are any, un-skipping `item` is refused with `has-dependents` (the reducer's rule): un-skipping
+ * never clears anything, so the user is told to mark it watched instead. Empty when the title is
+ * fully watched, since it then stays satisfied without the skip.
+ */
+export function unskipBlockers(item: ContentItem, index: ViewingIndex): ContentItem[] {
+  if (isWatchedComplete(item, index)) return [];
+  const later = new Set(dependents(item.id));
+  return CONTENT.filter(
+    (candidate) => later.has(candidate.id) && unitEpisodes(candidate).some((episode) => index.watched.has(progressKey(candidate.id, episode))),
+  );
 }
 
 /**

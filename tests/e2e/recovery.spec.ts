@@ -27,11 +27,12 @@ async function confirmCode(page: Page, heading: string) {
   return code;
 }
 
-async function closeGuideIfOpen(page: Page) {
-  const guide = page.getByRole("dialog", { name: "Doom Flix guide" });
-  await expect(guide).toBeVisible();
-  await page.getByRole("button", { name: "Back to dashboard" }).click();
-  await expect(guide).toBeHidden();
+/** A new account lands on the catch-up wizard (package 2.3); close it to reach the dashboard. */
+async function closeCatchUp(page: Page) {
+  const wizard = page.getByRole("dialog", { name: "Catch up on what you've watched" });
+  await expect(wizard).toBeVisible();
+  await wizard.getByRole("button", { name: "Close catch-up" }).click();
+  await expect(wizard).toBeHidden();
 }
 
 async function signIn(page: Page, username: string, password: string) {
@@ -59,7 +60,7 @@ test("sign up, save the recovery code, recover with it; the old password stops w
 
   const code = await confirmCode(page, "Save your recovery code");
   expect(code).toBe(shownCode);
-  await closeGuideIfOpen(page);
+  await closeCatchUp(page);
   await page.getByRole("button", { name: "Log out" }).click();
 
   // Forgot password: username, the saved code (typed in lower case, as people do), a new password.
@@ -101,7 +102,7 @@ test("account panel: sign out everywhere, then delete the account", async ({ pag
 
   await signUpThroughTheScreen(page, username);
   await confirmCode(page, "Save your recovery code");
-  await closeGuideIfOpen(page);
+  await closeCatchUp(page);
 
   // Sign out everywhere: needs the current password, and lands on the sign-in screen.
   await page.getByRole("button", { name: `Open account: ${username}` }).click();

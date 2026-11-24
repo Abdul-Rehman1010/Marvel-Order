@@ -4,7 +4,9 @@
  * Seeds a profile through the API (nine MCU films, X-Men (2000) and four Daredevil
  * Season 1 episodes), then saves screenshots at each project's viewport (1440x900,
  * 1366x768 and 390x844) into `.tmp/shots/<project>/` and records layout numbers in
- * `.tmp/shots/<project>/metrics.json`. Compare runs by opening the images.
+ * `.tmp/shots/<project>/metrics.json`. Compare runs by opening the images. The layout
+ * numbers are taken before anything is changed, so later shots (an un-watch question,
+ * an offline tick, a skip) do not move them.
  */
 import { mkdirSync, writeFileSync } from "node:fs";
 import path from "node:path";
@@ -219,6 +221,46 @@ test("baseline screenshots and layout numbers", async ({ page }, testInfo) => {
   await page.unroute("**/api/progress");
   await page.evaluate(() => window.dispatchEvent(new Event("online")));
   await waitForSync(page);
+
+  // 13. Skip confirmation (package 2.2), from the card's menu: skipping Age of Ultron opens Ant-Man.
+  const ultron = page.locator("#timeline-item-age-of-ultron");
+  await ultron.getByRole("button", { name: "More actions for Avengers: Age of Ultron" }).click();
+  await page.getByRole("menuitem", { name: "Skip this title" }).click();
+  const skipDialog = page.getByRole("alertdialog", { name: "Skip Avengers: Age of Ultron?" });
+  await expect(skipDialog).toContainText("Skipping it unlocks Ant-Man.");
+  await shots.take(page, "13-skip-confirmation");
+  await skipDialog.getByRole("button", { name: "Skip title" }).click();
+  await expect(skipDialog).toBeHidden();
+
+  // 14. The skipped card: muted poster, "Skipped" chip, Watch anyway and Un-skip.
+  await expect(ultron.locator(".skip-chip")).toHaveText("Skipped");
+  await ultron.scrollIntoViewIfNeeded();
+  await shots.take(page, "14-skipped-card");
+  await waitForSync(page);
+
+  // 15. The skipped title's drawer: the skip explained, "Mark as watched" still there, and Un-skip.
+  await ultron.locator(".card-visual").click();
+  const skippedDrawer = page.getByRole("dialog", { name: "Avengers: Age of Ultron" });
+  await expect(skippedDrawer.locator(".skip-alert")).toBeVisible();
+  await shots.take(page, "15-drawer-skipped");
+  await closeDialogWithEscape(page, "Avengers: Age of Ultron");
+
+  // 16. Catch-up wizard (package 2.3), from the account panel, with "Through Endgame" picked.
+  await page.getByRole("button", { name: `Open account: ${username}` }).click();
+  await page.getByRole("dialog", { name: username }).getByRole("button", { name: "Catch up on what you've watched" }).click();
+  const wizard = page.getByRole("dialog", { name: "Catch up on what you've watched" });
+  await wizard.getByRole("button", { name: "Through Endgame" }).click();
+  await expect(wizard).toContainText("22 titles, through Avengers: Endgame");
+  await shots.take(page, "16-catch-up-pick");
+
+  // 17. Its Review step: the films already watched are left out; skipped Age of Ultron stays skipped.
+  await wizard.getByRole("button", { name: "Next", exact: true }).click();
+  await wizard.getByRole("button", { name: "Next", exact: true }).click();
+  await wizard.getByRole("button", { name: "Review", exact: true }).click();
+  await expect(wizard.getByRole("heading", { name: "Check the list, then save it" })).toBeVisible();
+  await shots.take(page, "17-catch-up-review");
+  await wizard.getByRole("button", { name: "Close catch-up" }).click();
+  await expect(wizard).toBeHidden();
 
   expect(cspViolations, "Content Security Policy violations").toEqual([]);
 });

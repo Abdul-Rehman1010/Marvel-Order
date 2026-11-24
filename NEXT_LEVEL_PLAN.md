@@ -394,7 +394,7 @@ Titles in `code` are catalogue ids. "Full account" means every released unit wat
 - Skipped card state: "Skipped" chip, muted poster, actions "Watch anyway" (normal marking; the skip disappears once fully watched) and "Un-skip". Un-skip is disabled, with the reason shown, when later watched titles depend on this one ("Mark it watched instead").
 - New archive filter value under Progress: "Skipped". Stats and rings show "N skipped" beside watched/remaining.
 - Switch every "is there more to do?" consumer from watched-complete to `isOutstanding`, otherwise a skipped title keeps showing as next or remaining: `doomsdayComplete`; the remaining runtime fed to the pace planner; the Remaining figure in `CheckpointCounts`; `nextRequired`, `nextUnlocked`, `nextByUniverse`; the "Unwatched" filter; `inProgressSeries` (a skipped, partly watched series must leave the in-progress list); the lock and complete icons in the command palette, shelf and lore scenes.
-- [ ] Acceptance: reducer tests for: skipping a locked title; skip → watch → auto-removal; skip keeps watched episodes; unskip refused with `has-dependents`; unwatch never removes skips. E2E: skip *The Incredible Hulk*, *Iron Man 2* unlocks.
+- [x] Acceptance: reducer tests for: skipping a locked title; skip → watch → auto-removal; skip keeps watched episodes; unskip refused with `has-dependents`; unwatch never removes skips. E2E: skip *The Incredible Hulk*, *Iron Man 2* unlocks. *(Done 2026-11-24: the five reducer cases pass (written in 1.3, now joined by tests for the new Undo-of-"Watch anyway" rule); `tests/e2e/skip.spec.ts` skips The Incredible Hulk from its card and Iron Man 2 unlocks, at all three sizes. See the 2.2 record.)*
 
 #### 2.3 Bulk marking and the catch-up wizard
 - Depends on 2.2. Wire `watchAll` and `bulk`.
@@ -407,7 +407,7 @@ Titles in `code` are catalogue ids. "Full account" means every released unit wat
 - The wizard builds its list so the server never has to refuse it: the selection is always closed over `prerequisiteChain`, **across universes** (choosing an MCU title at or after *Multiverse of Madness* pulls in *X-Men* (2000); choosing *Hawkeye* pulls in everything through *Endgame*), and the Review step says which titles were added for that reason. Unreleased titles and `dataPending` series are not selectable. If the server still rejects, show the title and the missing prerequisite it names, with a button that adds it.
 - Entry points: straight after signup (replacing the automatic lore guide; the wizard links to "How it works"), the account menu, and an inline prompt above the archive while the profile has no progress.
 - Tests: bulk ordering, whole-action failure naming the offender, backfilled rows excluded from pace. E2E: new account → "Through Endgame" → readiness jumps, reload persists, under 60 s of interaction.
-- [ ] Acceptance: tests green.
+- [x] Acceptance: tests green. *(Done 2026-11-24: 312 unit and API tests and 72 browser tests pass, on the dev server and on a production build. `tests/e2e/catch-up.spec.ts` signs up, picks "Through Endgame" and sees readiness jump and survive a reload, in a few seconds of interaction at all three sizes. See the 2.3 record.)*
 
 #### 2.4 Split the monolith and server-render the first screen
 - Depends on 2.1. Pure restructuring in three steps; run `npm run shots` and compare after **each** step before starting the next.
@@ -884,7 +884,7 @@ Each package appends here when it is done: what changed, anything that differs f
 - Layout at 1440 / 1366 / 390: first card top 1,325 / 1,325 / 2,184 px (was 1,379 / 1,379 / 2,242); page height 12,585 / 12,607 / 24,024 px; text under 11 px 26 / 26 / 32 nodes (was 29 / 29 / 35); no horizontal overflow. Compare later runs with these numbers.
 - `marvel-vault.db`, `public/watch-links.csv` and `src/lib/watch-links.ts` untouched.
 
-### M2 — Fast start, fast flow (in progress: 2.1 done on 2026-11-24)
+### M2 — Fast start, fast flow (in progress: 2.1, 2.2 and 2.3 done on 2026-11-24)
 
 **2.1 Client progress store: instant ticks, Undo, accurate confirmations** (Opus, 2026-11-24). The unit tests for the queue were written before the store, as §8 asks when this package runs on Opus.
 
@@ -951,3 +951,172 @@ Each package appends here when it is done: what changed, anything that differs f
 - Layout numbers are unchanged from 1.6: first card 1,325 / 1,325 / 2,184 px, page height 12,585 / 12,607 / 24,024 px, text under 11 px 26 / 26 / 32 nodes, no horizontal overflow. The new shots 11 and 12 were looked at at all three sizes.
 - "No code path awaits the server before updating the UI": every progress change goes through `dispatch`, which updates the snapshot before anything is sent. The only awaits left in `marvel-nexus.tsx` are the first load, sign-in and sign-out; the account panel's awaits are not about progress.
 - `marvel-vault.db` is now 102,400 bytes, modified 2026-11-22 21:31, two minutes before the owner's "1.6" commit (it was 94,208 bytes at the 1.6 check). Nothing in this package opened it; the growth fits the owner's dev server applying migrations 3 and 4 (`KNOWN_GAPS.md` A5). `public/watch-links.csv` and `src/lib/watch-links.ts` are untouched.
+
+**2.2 Skipped state** (Opus, 2026-11-24).
+
+*What exists now.*
+- **Skipping a title.** A title that is neither fully watched nor skipped has a "⋯" menu on its card ("More actions for {title}", `src/components/nexus/card-menu.tsx`, a keyboard-operable menu button) holding "Skip this title". The drawer offers the same as a secondary action under its main buttons.
+  - Both open `src/components/nexus/skip-confirmation.tsx`: "Skip {title}?", the plan's sentence ("It will count as cleared for unlocking later titles, but not as watched."), what the skip unlocks right now ("Skipping it unlocks Iron Man 2."), that watched episodes stay, that an optional title never locks anything, and that it can be un-skipped or still watched. Focus starts on Cancel.
+- **Recap.** `src/lib/catalogue/extras.ts` (listed in §4.2) holds a `recap` per title. When one exists, the dialog shows "What you need to know" with a "Reveal (spoilers for this title)" toggle. None are written yet: 3.2 writes them for the titles triage skips.
+- **Skipped card.** "Skipped" chip and a muted poster (no lock overlay). Two actions:
+  - "Watch anyway": a movie is marked watched; a series opens its episodes. Disabled with a lock icon while the movie is locked.
+  - "Un-skip": disabled while a watched later title relies on the skip, with the reason under it: "Can't un-skip: you watched Iron Man 2, which needs it. Mark it watched instead." It uses the engine helper `unskipBlockers`, which agrees with the reducer's `has-dependents` rule.
+- **Skipped drawer.**
+  - A "SKIPPED" notice explains the state, and names the blocking titles if there are any.
+  - "Mark as watched" / "Mark E05 watched" stay as the way to watch it anyway, and the secondary action becomes "Un-skip".
+  - The viewing path counts a skipped prerequisite as cleared and labels it "Skipped".
+- **Filter and counts.** The Progress filter has "Unwatched" (neither watched nor skipped) and "Skipped". Both rings' counts gain a "Skipped" row when anything is skipped, so watched + remaining + skipped equals the checkpoint total in the line above.
+- **"Is there more to do?" consumers.**
+  - The Remaining count comes from the stats' `remainingUnits`.
+  - The in-progress series list drops a skipped, partly watched series.
+  - The command palette and the lore guide's Phase One strip show a skip mark instead of a check or a lock.
+  - `doomsdayComplete`, the pace planner's remaining time, `nextRequired`, `nextUnlocked`, `nextByUniverse` and the Unwatched filter already looked at "satisfied" since 1.3.
+- A new colour token, `--skipped` (the slate blue of the scheduled alert, lightened for text), marks everything skipped.
+
+*Decisions beyond the text above. Later packages should know these.*
+1. **Undo after "Watch anyway" puts the skip back.** This closes gap C15.
+   - The problem: watching a skipped title to the end removes its skip (§4.4). The plain Undo (an un-watch) would then make the title unsatisfied and clear every later title the skip had opened, which are exactly the titles the user went on to watch.
+   - The rule: `unwatch` takes an optional `restoreSkip: "manual" | "triage"`. The unit is removed and the title is skipped again in the same step, before the cascade check, so nothing later is cleared. Without the field, un-watching is unchanged.
+   - The client sets it on the checkpoint toast's Undo when the watch ended a skip, with the skip's original reason. `POST /api/progress` accepts the field, and the property test uses it in a quarter of its un-watches.
+   - "Skip again, then un-watch" was rejected: the reducer ignores a skip on a fully watched title, and the property test treats skipped-and-fully-watched as invalid.
+2. **Skipped counts are units** (movies plus episodes), like Watched and Remaining beside them, so the three add up to the checkpoint total. "Skipped 10" can mean one movie and a nine-episode series.
+3. **Skipping always asks; un-skipping never does.** An un-skip clears nothing and can be skipped again at once; it is refused only while watched titles would be left without a prerequisite.
+4. **Any title that is not fully watched or already skipped can be skipped**, including locked, unreleased and optional ones (the rule has no precondition). For an optional title the dialog says it only takes the title off the list.
+5. **No Undo on the skip toast.** The skip was confirmed in a dialog, and the card offers Un-skip.
+6. **Milestones still count watched titles only** ("Phase One complete" means every required title in it is watched). The ring's "Doomsday protocol complete" heading counts skipped titles as cleared, as the plan's `doomsdayComplete` rule requires.
+7. **The menu has one item for now**; 2.7 adds "Remove watched status". It appears only on titles still to do, because a skipped card shows its actions directly.
+8. **`useDialogBehavior` honours `data-autofocus`**, so the skip dialog starts on Cancel rather than on its first control (the spoiler toggle, once a recap exists).
+9. **On phones, Moon Knight's "⋯" moves onto its own line**, because its badges ("Optional · Safe to skip", "Dev pick") fill the top line. It is the only card affected; page height at 390 px goes from 24,024 to 24,050 px. 2.7 redesigns the card.
+10. **Extra files beyond §4.2**: `components/nexus/card-menu.tsx` and `components/nexus/skip-confirmation.tsx`, one component each, so they can be tested on their own.
+
+*Tests.* `npm test`: 291 passed in 12 files (274 before).
+- The five reducer cases in this package's acceptance already existed from 1.3 and still pass:
+  - "a skip has no precondition…" (a locked title);
+  - "the skip ends by itself when the title becomes fully watched";
+  - "a partly watched title can be skipped: rows kept…";
+  - "unskip never clears anything: it is refused while later titles depend on the skip";
+  - "an un-watch cascade removes watched rows but never a skip".
+- `tests/unit/engine.test.ts`, 5 new:
+  - `isSkipped`;
+  - `unskipBlockers` agreeing with the reducer;
+  - Undo of a skipped movie: the triage reason comes back, later progress is kept, and a plain un-watch would have cleared it;
+  - Undo of a skipped series' last episode;
+  - `restoreSkip` on an absent unit, or on a title that is still skipped, adds nothing.
+- `tests/unit/engine-properties.test.ts`: walks with skips also draw `restoreSkip` un-watches. Walks without skips draw exactly the same numbers as before.
+- `tests/unit/progress-client.test.ts`, 3 new:
+  - the Undo toast carries the skip's reason and says "no longer skipped";
+  - `skipImpact`;
+  - a store round trip: skip, watch a later title, watch anyway, Undo; the server keeps the later title and the skip.
+- `tests/api/progress.test.ts`: `restoreSkip` is stored through the route, and an invalid value is a 400.
+- New `tests/unit/skip-ui.test.tsx` (8, jsdom; the first component tests in the repo):
+  - the card menu: keyboard, Escape, a press outside, focus moving away;
+  - the skip dialog: its text, the optional-title line, the recap toggle.
+- New `tests/e2e/skip.spec.ts` (3 tests × 3 sizes):
+  - skip The Incredible Hulk from its card: Iron Man 2 unlocks, the counts and both filters update, and the skip is saved and survives a reload;
+  - Un-skip is blocked while Iron Man 2 is watched; Watch anyway, then Undo, puts the skip back without asking and keeps Iron Man 2;
+  - a partly watched series is skipped from its drawer, keeps its episodes, leaves the in-progress shelf, and is un-skipped.
+- The screens spec adds `13-skip-confirmation`, `14-skipped-card` and `15-drawer-skipped`.
+- **Fixed a timing weakness in 2.1's Undo test.** An installed Playwright clock keeps running in real time, and the dev build's re-render after a tick (about a second on this machine) used up the test's 0.5 s margin. The test failed on the committed 2.1 code as well. It now pauses the page clock once the dashboard has loaded, so only `runFor` moves time.
+
+**Verification after 2.2, 2026-11-24** (scratch databases only):
+- lint: 0 errors (same one warning); typecheck: clean; `npm test`: 291 passed; `npm run build`: OK.
+- `npx playwright test`: 60 passed on the dev server and 60 on a production build (`next start`, production CSP), with no CSP violations.
+- Layout:
+
+  | Size | First card top | Page height | Text under 11 px | Horizontal overflow |
+  | --- | --- | --- | --- | --- |
+  | 1440 | 1,325 px (unchanged) | 12,585 px (unchanged) | 26 nodes | none |
+  | 1366 | 1,325 px (unchanged) | 12,607 px (unchanged) | 26 nodes | none |
+  | 390 | 2,184 px (unchanged) | 24,050 px (+26: Moon Knight, decision 9) | 32 nodes | none |
+- Looked at:
+  - the new shots 13–15 at all three sizes;
+  - a one-off check of the counts row with something skipped, a skipped title that is also locked, and Moon Knight's menu on a phone.
+- A tick in the production build takes 40–170 ms from the click to the next frame (150–400 ms in dev).
+- One `git stash` / `git stash pop` round trip was used to time the committed 2.1 code. With `core.autocrlf` set, it rewrote the 15 modified files with CRLF line endings; they were converted back to LF, as they were before. No commit was made.
+- `marvel-vault.db` is unchanged since 2.1 (102,400 bytes, 2026-11-22 21:31). `public/watch-links.csv` and `src/lib/watch-links.ts` are untouched.
+
+**2.3 Bulk marking and the catch-up wizard** (Opus, 2026-11-24).
+
+*What exists now.*
+- **Series card.** An unlocked series that is not skipped has "Mark E05 watched" (its first unwatched episode) and, beside it, the episode count ("4/13"), which opens the drawer. The count's accessible name is "Open {title}: 4 of 13 episodes watched".
+- **Series drawer.** "Mark all 9 remaining" (accessible name "Mark all 9 remaining episodes watched") sits beside the next-episode button, in the secondary row with Skip, whenever two or more episodes are left. It sends `watchAll`. The Undo on its toast removes exactly the episodes it added, without asking about them.
+- **`src/lib/client/catch-up.ts`** (pure): the wizard's rules.
+  - What a pick covers (`titlesThrough`), and the optional titles before it (`optionalBefore`).
+  - What can be offered (`isSelectable`, `selectableTitles`), and "Everything released" (`lastReleasedRequired`).
+  - Closing a selection over every prerequisite, across universes, noting which pick needed each added title (`closeOverPrerequisites`, `streetChoices`).
+  - The Review rows and the one `bulk` action (`planCatchUp`), and the summary sentence (`catchUpSummary`).
+- **`src/components/nexus/catch-up-wizard.tsx`**: a dialog, "Catch up on what you've watched", in four steps.
+  1. **MCU.** "What is the latest MCU title you've seen?": a phase-grouped radio list with posters (titles already watched carry a check), quick picks "Nothing yet", "Through Endgame" and "Everything released", and a line such as "22 titles, through Avengers: Endgame".
+  2. **X-Men.** The same, with "Nothing yet" and "Everything released". It says when the MCU pick already includes *X-Men* (2000).
+  3. **Street-Level.** A checkbox list. A ticked season ticks the seasons it needs (shown ticked and fixed: "Ticked because Daredevil — Season 2 needs it"). A season that needs MCU titles says so: "Also adds 22 earlier titles it needs, through Avengers: Endgame".
+  4. **Review.**
+     - A summary: "Will mark 21 movies (45h 42m) as watched, and skip 1 title." (Through Endgame, with Iron Man not seen.)
+     - Rows by universe, each with "Haven't seen this". On a required title it becomes a skip ("Will be skipped, so later titles stay unlocked"); on an optional title it is simply "Not included".
+     - Titles pulled in by a prerequisite say "Added: Hawkeye needs it". Optional titles before a pick are listed un-ticked. Titles already watched are left out, with a note; titles already skipped stay skipped unless the user says they saw them.
+  - Confirming sends one `bulk` with `backfilled: true`. The toast reads "Caught up: 22 titles · readiness now 33%" for a new account through Endgame, and lists every milestone reached.
+  - Focus starts on each step's question, and each step starts at its top. "How it works" and Close sit at the top right.
+- **Entry points.**
+  - Straight after sign-up, instead of the lore guide. "How it works" opens the guide, and the wizard comes back where it was left.
+  - The account panel: a "Catch up" section at the top.
+  - A prompt above the archive while nothing is watched or skipped: "Already watched some of these?"
+- **Refusals.** If the rules refuse the action on this device, the wizard stays open and says why. If the server refuses it later (for example, another device removed a prerequisite), the wizard reopens at Review with the reason, and with "Add {title}" when the missing title is not in the list.
+- **`recentPace(state, now, days = 14)`** in `src/lib/engine/stats.ts`: runtime per day of real watching. Backfilled rows are left out. Nothing shows it yet; 3.3 uses it.
+
+*Decisions beyond the text above. Later packages should know these.*
+1. **A pick covers every required title up to it, plus the picked title itself**, so picking an optional title as the latest seen marks it too. "Everything released" is the last released *required* title (VisionQuest today), and the optional titles before it are listed un-ticked, as for any pick.
+2. **The selection is closed over every transitive prerequisite** (`ancestors`), not only the direct ones. Titles added that way are labelled in Review, and in the Street-Level step.
+3. **Already watched or skipped.** Titles already fully watched are left out of Review and the action, with a count. Titles already skipped start as "Haven't seen this", so their skip stays.
+4. **The "Caught up" toast is for every backfilled `bulk`.** Other bulks keep "Marked N titles watched" (3.2's triage is a skip-only bulk).
+5. **The catch-up toast has no Undo.** No single action reverses a bulk; un-watching its first title, through the usual confirmation listing everything after it, is the way back. Recorded as gap C20.
+6. **A server refusal brings the wizard back.** It is matched by the action object the store keeps for the queued entry. The usual rejection message is shown as well.
+7. **Undo after "Mark all N remaining" does not ask about the episodes it added.** The toast's `UndoTarget` carries `addedEpisodes`. It still asks if titles outside the series would be cleared.
+8. **The pick list does not jump to a quick pick's title.** The line under the picks names it, and jumping would hide that line and the picks.
+9. **`view=catchup` is not wired.** URL state for overlays arrives with `use-url-state.ts` in 2.5.
+10. **"The account menu" is the account panel for now**; 2.6 brings the menu.
+11. **The wizard's footer is a `div`.** The page's `footer` element styles (a 100 px minimum height, and a column layout on phones) would apply to a `<footer>`.
+12. **"How it works" sits beside Close.** In the footer it was hidden on phones by Next.js's "N" badge, which dev mode draws in the bottom-left corner.
+13. **Extra file beyond §4.2**: `lib/client/catch-up.ts`, so the rules are tested without React.
+
+*Tests.* `npm test`: 312 passed in 14 files (291 before).
+- The plan's "bulk ordering" and "whole-action failure naming the offender" cases already existed from 1.3 and still pass ("applies the watch list in graph order…", "fails as a whole and names the title and what it is missing").
+- New `tests/unit/catch-up.test.ts` (13):
+  - what a pick covers, and the optional titles before it;
+  - unreleased titles and unpublished series are never offered, and "Everything released" follows the clock;
+  - Multiverse of Madness adds X-Men (2000); Hawkeye adds the MCU through Endgame; the Street-Level step's ticks and notes;
+  - the "Through Endgame" plan; "Haven't seen this" on required and optional titles; a partly watched series; titles already skipped; "Add";
+  - **every action the wizard can build is accepted by the reducer and leaves nothing out of order.** This covers every MCU pick with a cycling X-Men pick and Street-Level selection, with and without "Haven't seen this" on a third of the titles, from an empty and a partly watched account: more than 150 combinations.
+- New `tests/unit/catch-up-wizard.test.tsx` (5, jsdom):
+  - the "Through Endgame" path to the exact bulk action, including a skip;
+  - Street-Level auto-ticks and the cross-universe note;
+  - a refusal with "Add";
+  - "How it works" hands back the draft;
+  - nothing picked means nothing to confirm.
+- `tests/unit/progress-client.test.ts`: the catch-up toast, while other bulks keep their wording; the Undo of `watchAll` carries the added episodes.
+- `tests/unit/engine.test.ts`, `recentPace` (2): a catch-up adds nothing to pace; the 14-day window; an episode's own runtime; unrecognised rows ignored.
+- New `tests/e2e/catch-up.spec.ts` (4 tests × 3 sizes):
+  - sign up, "Through Endgame": readiness goes from 0% to the toast's figure, the 22 rows are backfilled, and it survives a reload, all well under 60 s;
+  - the archive prompt and the account panel both open the wizard; Hawkeye with "Haven't seen Iron Man" gives 22 titles watched and Iron Man skipped;
+  - a series card's "Mark E04 watched", the drawer's "Mark all 9 remaining", then Undo back to four episodes;
+  - another device removes Iron Man, the server refuses the catch-up, and the wizard reopens at Review and succeeds on the second try.
+- `smoke.spec.ts` and `recovery.spec.ts`: sign-up now lands on the wizard. The smoke test also follows "How it works" to the lore guide and back.
+- `screens.spec.ts` adds `16-catch-up-pick` and `17-catch-up-review`. `06-drawer-series` now shows the "Mark all 9 remaining" row.
+
+**Verification after 2.3, 2026-11-24** (scratch databases only):
+- lint: 0 errors (same one warning); typecheck: clean; `npm test`: 312 passed; `npm run build`: OK.
+- `npx playwright test`: 72 passed on the dev server and 72 on a production build (`next start`, production CSP), with no CSP violations.
+- Layout:
+
+  | Size | First card top | Page height | Text under 11 px | Horizontal overflow |
+  | --- | --- | --- | --- | --- |
+  | 1440 | 1,325 px (unchanged) | 12,585 px (unchanged) | 26 nodes | none |
+  | 1366 | 1,325 px (unchanged) | 12,607 px (unchanged) | 26 nodes | none |
+  | 390 | 2,184 px (unchanged) | 24,058 px (+8 since 2.2: Moon Knight's card now has the two-button row) | 32 nodes | none |
+- Looked at:
+  - shots 06, 16 and 17 at all three sizes;
+  - one-off checks of the archive prompt, the Street-Level step, Review with added titles, and a series card on a phone.
+- Fixed after looking:
+  - the pick list jumped down and hid the quick picks;
+  - on phones each "Haven't seen this" took a line of its own;
+  - the page footer's styles leaked into the wizard;
+  - Next's dev badge covered "How it works" on phones.
+- `marvel-vault.db` is unchanged since 2.1 (102,400 bytes, 2026-11-22 21:31). `public/watch-links.csv` and `src/lib/watch-links.ts` are untouched.

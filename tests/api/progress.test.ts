@@ -627,6 +627,32 @@ describe("POST /api/progress", () => {
     expect((await refused.json()).code).toBe("has-dependents");
   });
 
+  it("accepts the Undo of a watch that ended a skip: the skip is stored again and nothing later is cleared", async () => {
+    const { url, client } = await newDatabase();
+    const { POST } = await server(url);
+    const send = async (body: unknown) => {
+      const response = await POST(request("POST", body));
+      expect(response.status, JSON.stringify(body)).toBe(200);
+      return response.json();
+    };
+
+    await send({ action: { type: "watch", contentId: "iron-man", episode: -1 } });
+    await send({ action: { type: "skip", contentId: "incredible-hulk", reason: "triage" } });
+    await send({ action: { type: "watch", contentId: "iron-man-2", episode: -1 } });
+    await send({ action: { type: "watch", contentId: "incredible-hulk", episode: -1 } });
+    expect((await stored(client)).skips).toEqual([]);
+
+    const undone = await send({ action: { type: "unwatch", contentId: "incredible-hulk", episode: -1, restoreSkip: "triage" }, confirmCleared: [] });
+    expect(undone.cleared).toEqual([]);
+    const state = await stored(client);
+    expect(titlesWithRows(state).sort()).toEqual(["iron-man", "iron-man-2"]);
+    expect(state.skips.map((skip) => [skip.contentId, skip.reason])).toEqual([["incredible-hulk", "triage"]]);
+
+    const malformed = await POST(request("POST", { action: { type: "unwatch", contentId: "iron-man-2", episode: -1, restoreSkip: "sometimes" } }));
+    expect(malformed.status).toBe(400);
+    expect(titlesWithRows(await stored(client)).sort()).toEqual(["iron-man", "iron-man-2"]);
+  });
+
   it("a rule failure is 409 with a code, a plain message and the prerequisite to watch; nothing is written", async () => {
     const { url, client } = await newDatabase();
     const { POST } = await server(url);
